@@ -7,7 +7,7 @@ import { showBoard } from './board-mirror'
 import { allAssetUtils, allShapeUtils, customAssetUtils, customShapeUtils, MAX_ASSET_SIZE } from './media'
 import { registerBookmarkHandler } from './media/bookmarks'
 import { getSavedSession, trackSession } from './sessions'
-import { Sidebar } from './Sidebar'
+import { Home } from './Home'
 import { Toolbar } from './Toolbar'
 import { WarmBoard } from './WarmBoard'
 
@@ -19,6 +19,12 @@ const licenseKey = import.meta.env.VITE_TLDRAW_LICENSE_KEY
 
 /** How many boards stay connected in the background for instant switching. */
 const MAX_WARM_BOARDS = 5
+
+/**
+ * 'opening' keeps the current screen up while the requested board loads, so
+ * nothing flashes; the editor appears once the board is swapped in.
+ */
+type View = 'home' | 'opening' | 'board'
 
 interface ShownBoard {
 	id: string
@@ -37,6 +43,7 @@ export function App() {
 	const [targetId, setTargetId] = useState<string | null>(null)
 	const [shown, setShown] = useState<ShownBoard | null>(null)
 	const [error, setError] = useState<string | null>(null)
+	const [view, setView] = useState<View>('home')
 
 	// The editor's own store lives as long as the app. Boards are swapped into it
 	// (see board-mirror.ts), so the editor and its UI are never remounted.
@@ -46,9 +53,11 @@ export function App() {
 	const [editor, setEditor] = useState<Editor | null>(null)
 	const stopTrackingSession = useRef<(() => void) | null>(null)
 
+	// The editor is unmounted while home is showing; boards are then swapped into the store alone.
 	const handleMount = useCallback((editor: Editor) => {
 		registerBookmarkHandler(editor)
 		setEditor(editor)
+		return () => setEditor(null)
 	}, [])
 
 	// The shown and target boards must never be evicted from the warm set.
@@ -67,6 +76,7 @@ export function App() {
 		(boardId: string) => {
 			setError(null)
 			setTargetId(boardId)
+			setView('opening')
 			warm(boardId)
 		},
 		[warm]
@@ -86,6 +96,7 @@ export function App() {
 		setTargetId((target) => {
 			if (target !== boardId) return target
 			setError(`Couldn't open board: ${err.message}`)
+			setView((view) => (view === 'opening' ? 'home' : view))
 			return null
 		})
 	}, [])
@@ -119,6 +130,23 @@ export function App() {
 
 	useEffect(() => () => stopTrackingSession.current?.(), [])
 
+	// Show the editor once the requested board is in it.
+	useEffect(() => {
+		if (view === 'opening' && shown && shown.id === targetId) setView('board')
+	}, [view, shown, targetId])
+
+	// Refresh the list (titles, edit times) whenever home is shown.
+	useEffect(() => {
+		if (view !== 'home') return
+		let cancelled = false
+		window.localdraw.listBoards().then((list) => {
+			if (!cancelled) setBoards(list)
+		}, console.error)
+		return () => {
+			cancelled = true
+		}
+	}, [view])
+
 	async function createBoard() {
 		try {
 			const board = await window.localdraw.createBoard()
@@ -130,23 +158,16 @@ export function App() {
 	}
 
 	const pendingId = targetId && targetId !== shown?.id ? targetId : null
-	const activeId = targetId ?? shown?.id ?? null
-	const activeTitle = boards?.find((board) => board.id === activeId)?.title ?? null
+	const shownTitle = shown ? (boards?.find((board) => board.id === shown.id)?.title ?? 'Untitled') : null
+	// While a board loads, stay on home if that's where it was opened from; on launch show nothing.
+	const showEditor = view === 'board' && shown
+	const showHome = view === 'home' || (view === 'opening' && shown)
 
 	return (
 		<div className="app">
-			<Toolbar title={activeTitle} onCreate={createBoard} />
-			<Sidebar
-				boards={boards}
-				activeId={activeId}
-				pendingId={pendingId}
-				error={error}
-				onOpen={open}
-				onWarm={warm}
-			/>
-			<main className="canvas">
-				{/* Mounted once the first board is loaded, then never unmounted. */}
-				{shown ? (
+			<Toolbar isHome={!showEditor} title={showEditor ? shownTitle : null} onHome={() => setView('home')} />
+			<main className="main">
+				{showEditor ? (
 					<Tldraw
 						store={editorStore}
 						onMount={handleMount}
@@ -156,9 +177,16 @@ export function App() {
 						assetUrls={assetUrls}
 						licenseKey={licenseKey}
 					/>
-				) : (
-					boards?.length === 0 && <p className="canvas-empty">Create a board to get started.</p>
-				)}
+				) : showHome ? (
+					<Home
+						boards={boards}
+						pendingId={pendingId}
+						error={error}
+						onOpen={open}
+						onWarm={warm}
+						onCreate={createBoard}
+					/>
+				) : null}
 			</main>
 			{warmIds.map((id) => (
 				<WarmBoard key={id} boardId={id} onReady={handleReady} onError={handleError} />

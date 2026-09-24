@@ -22,7 +22,8 @@ const CSP = [
 	"img-src 'self' data: blob: localdraw: https:",
 	"media-src 'self' blob: localdraw:",
 	"font-src 'self' data:",
-	"connect-src 'self' data: blob: localdraw:",
+	// cdn.tldraw.com: the tldraw SDK's license check ping (trial and watermarked licenses).
+	"connect-src 'self' data: blob: localdraw: https://cdn.tldraw.com",
 	// Embeds (YouTube, Figma, …). tldraw only creates them for its known providers.
 	"frame-src https:",
 	"object-src 'none'",
@@ -45,6 +46,8 @@ export function rendererConfig() {
 	return {
 		configFile: false,
 		root: src('renderer'),
+		// Read .env files (e.g. VITE_TLDRAW_LICENSE_KEY in .env.local) from the repo root.
+		envDir: root,
 		base: './',
 		plugins: [react(), contentSecurityPolicy()],
 		server: { port: 5173, strictPort: true },

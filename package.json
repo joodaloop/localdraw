@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "A local-first library of tldraw boards",
+  "license": "MIT",
   "type": "module",
   "main": "dist/main/main.cjs",
   "packageManager": "pnpm@11.11.0",

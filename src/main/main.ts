@@ -24,6 +24,12 @@ const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
 const RENDERER_DIR = path.join(__dirname, '../renderer')
 const APP_ORIGIN = DEV_SERVER_URL ? originOf(DEV_SERVER_URL) : 'localdraw://app'
 
+// Development gets its own data folder (…/Application Support/localdraw-dev), so
+// work-in-progress code never touches the boards in your real one. This must run
+// before anything reads userData, including the single-instance lock below, which
+// is per data folder: dev and the built app can therefore run side by side.
+if (DEV_SERVER_URL) app.setPath('userData', path.join(app.getPath('appData'), 'localdraw-dev'))
+
 // Two app instances would each run their own sync rooms against the same
 // database and silently diverge, so only ever run one.
 if (!app.requestSingleInstanceLock()) app.quit()

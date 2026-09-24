@@ -6,26 +6,35 @@ const HOVER_WARM_DELAY_MS = 100
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
-interface SidebarProps {
+interface HomeProps {
 	boards: BoardSummary[] | null
-	activeId: string | null
 	pendingId: string | null
 	error: string | null
 	onOpen(boardId: string): void
 	onWarm(boardId: string): void
+	onCreate(): void
 }
 
-export function Sidebar({ boards, activeId, pendingId, error, onOpen, onWarm }: SidebarProps) {
+export function Home({ boards, pendingId, error, onOpen, onWarm, onCreate }: HomeProps) {
 	const hoverTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
 
 	return (
-		<nav className="sidebar" aria-label="Boards">
-			<ul className="board-list">
+		<div className="home">
+			<header className="home-header">
+				<h1>Boards</h1>
+				<button type="button" className="primary" onClick={onCreate}>
+					New board
+				</button>
+			</header>
+
+			{error && <p className="home-error">{error}</p>}
+			{boards?.length === 0 && <p className="home-empty">No boards yet.</p>}
+
+			<ul className="board-grid">
 				{boards?.map((board) => (
 					<li key={board.id}>
 						<button
 							type="button"
-							aria-current={board.id === activeId ? 'page' : undefined}
 							data-pending={board.id === pendingId || undefined}
 							onClick={() => onOpen(board.id)}
 							onFocus={() => onWarm(board.id)}
@@ -36,13 +45,11 @@ export function Sidebar({ boards, activeId, pendingId, error, onOpen, onWarm }: 
 							onPointerLeave={() => clearTimeout(hoverTimer.current)}
 						>
 							<span className="board-title">{board.title}</span>
-							<span className="board-date">{dateFormat.format(board.createdAt)}</span>
+							<span className="board-date">Edited {dateFormat.format(board.updatedAt)}</span>
 						</button>
 					</li>
 				))}
 			</ul>
-
-			{error && <p className="sidebar-error">{error}</p>}
-		</nav>
+		</div>
 	)
 }
