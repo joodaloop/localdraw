@@ -8,7 +8,7 @@ import {
 const SAVE_DELAY_MS = 1000
 
 // The latest known view state (page, camera, selection) of each board: loaded
-// from the backend when a board warms up, then kept current while it's shown.
+// from the backend when a board connects, then kept current while it's shown.
 const latest = new Map<string, TLSessionStateSnapshot>()
 
 export async function preloadSession(boardId: string) {

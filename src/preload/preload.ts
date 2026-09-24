@@ -4,11 +4,19 @@ import type { LocaldrawApi } from '../shared/api'
 const api: LocaldrawApi = {
 	listBoards: () => ipcRenderer.invoke('backend', 'listBoards'),
 	createBoard: () => ipcRenderer.invoke('backend', 'createBoard'),
+	renameBoard: (boardId, title) => ipcRenderer.invoke('backend', 'renameBoard', boardId, title),
 	putAsset: (upload) => ipcRenderer.invoke('backend', 'putAsset', upload),
 	getSession: (boardId) => ipcRenderer.invoke('backend', 'getSession', boardId),
 	saveSession: (boardId, state) => ipcRenderer.invoke('backend', 'saveSession', boardId, state),
 	getLastBoardId: () => ipcRenderer.invoke('backend', 'getLastBoardId'),
 	unfurl: (url) => ipcRenderer.invoke('unfurl', url),
+	getMemoryUsage: () => ipcRenderer.invoke('memory-usage'),
+
+	onGoHome(callback) {
+		const listener = () => callback()
+		ipcRenderer.on('go-home', listener)
+		return () => void ipcRenderer.off('go-home', listener)
+	},
 
 	// MessagePorts can't cross the context bridge, so the preload keeps the port
 	// and exposes plain send/close functions to the page instead.
@@ -31,4 +39,8 @@ contextBridge.exposeInMainWorld('localdraw', api)
 // document doesn't exist yet when the preload runs.
 window.addEventListener('DOMContentLoaded', () => {
 	document.documentElement.dataset.platform = process.platform
+})
+
+ipcRenderer.on('full-screen', (_event, isFullScreen: boolean) => {
+	document.documentElement.toggleAttribute('data-full-screen', isFullScreen)
 })

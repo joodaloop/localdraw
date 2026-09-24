@@ -78,6 +78,7 @@ const stmts = {
 	insertBoard: db.prepare('INSERT INTO boards (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)'),
 	boardExists: db.prepare('SELECT 1 FROM boards WHERE id = ?'),
 	touchBoard: db.prepare('UPDATE boards SET updated_at = ? WHERE id = ?'),
+	renameBoard: db.prepare('UPDATE boards SET title = ?, updated_at = ? WHERE id = ?'),
 	insertAsset: db.prepare('INSERT OR IGNORE INTO assets (hash, mime, name, size) VALUES (?, ?, ?, ?)'),
 	getAssetInfo: db.prepare('SELECT mime, size FROM assets WHERE hash = ?'),
 	getSession: db.prepare('SELECT state FROM sessions WHERE board_id = ?'),
@@ -89,6 +90,7 @@ const stmts = {
 }
 
 const MAX_SESSION_BYTES = 1_000_000
+const MAX_TITLE_LENGTH = 200
 
 // --- sync rooms -------------------------------------------------------------
 
@@ -214,6 +216,13 @@ const methods: BackendMethods = {
 		if (!isBoardId(boardId)) throw new Error('Invalid board id')
 		const row = stmts.getSession.get(boardId) as { state: string } | undefined
 		return row ? JSON.parse(row.state) : null
+	},
+
+	renameBoard(boardId, title) {
+		if (!isBoardId(boardId)) throw new Error('Invalid board id')
+		const trimmed = typeof title === 'string' ? title.trim() : ''
+		if (!trimmed || trimmed.length > MAX_TITLE_LENGTH) throw new Error('Invalid board title')
+		stmts.renameBoard.run(trimmed, Date.now(), boardId)
 	},
 
 	saveSession(boardId, state) {

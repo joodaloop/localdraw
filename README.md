@@ -1,18 +1,10 @@
 # Localdraw
 
-A local-first desktop app for [tldraw](https://tldraw.dev) boards: a whiteboard you can depend on the way you depend on a text editor. Everything lives on your machine, works offline, and needs no account.
+A local-first desktop app for [tldraw](https://tldraw.dev) boards.
 
 Development plan and ideas: [joodaloop.com/localdraw](https://joodaloop.com/localdraw/)
 
 > **Status:** early and in active development. Expect rough edges, and keep backups of anything you care about.
-
-## Features
-
-- **A library of boards**: a home screen of all your boards; the app reopens the last one you used.
-- **Fast switching**: recently used boards stay loaded, so opening them is instant, and each board reopens at the page and camera position you left it.
-- **The full tldraw editor**: every drawing tool, pages, styles, export to PNG/SVG, embeds and link previews.
-- **Media**: images, video, audio and PDFs (PDFs show as file cards for now). Files up to 500 MB, stored on disk, with seekable audio and video.
-- **Private by default**: no network requests except the ones you cause (embeds, link previews, pasted image URLs), plus the tldraw SDK's license check in production builds.
 
 ## Getting started
 
@@ -46,7 +38,7 @@ tldraw offers free trial and hobby (non-commercial) licenses at [tldraw.dev](htt
 
 Localdraw is an Electron app with three processes:
 
-- **Renderer** (`src/renderer/`): React and the tldraw editor. A single editor store lives for the whole session and boards are swapped into it (`board-mirror.ts`), while a few recently used boards are kept connected in the background (`WarmBoard.tsx`).
+- **Renderer** (`src/renderer/`): React and the tldraw editor. A single editor store lives for the whole session and boards are swapped into it (`board-mirror.ts`); only the open board is connected to the backend (`BoardSync.tsx`).
 - **Backend** (`src/backend/`): a utility process that owns the SQLite database (via the built-in `node:sqlite`) and runs a [tldraw sync](https://tldraw.dev/docs/sync) room per open board. The renderer talks to it over a `MessagePort`, so there's no local server or open port.
 - **Main** (`src/main/`): windows, menus, and the `localdraw://` protocol, which serves the app and stored files (with range requests). It also fetches link previews.
 

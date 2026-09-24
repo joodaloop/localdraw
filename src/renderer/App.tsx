@@ -9,16 +9,13 @@ import { registerBookmarkHandler } from './media/bookmarks'
 import { getSavedSession, trackSession } from './sessions'
 import { Home } from './Home'
 import { Toolbar } from './Toolbar'
-import { WarmBoard } from './WarmBoard'
+import { BoardSync } from './BoardSync'
 
 // Bundle tldraw's fonts, icons and translations instead of loading them from its CDN.
 // Vite already resolves these to absolute localdraw:// URLs, which tldraw's default
 // formatter would mangle (it only treats http(s) and data: URLs as absolute).
 const assetUrls = getAssetUrlsByImport((url) => url)
 const licenseKey = import.meta.env.VITE_TLDRAW_LICENSE_KEY
-
-/** How many boards stay connected in the background for instant switching. */
-const MAX_WARM_BOARDS = 5
 
 /**
  * 'opening' keeps the current screen up while the requested board loads, so
@@ -34,8 +31,8 @@ interface ShownBoard {
 
 export function App() {
 	const [boards, setBoards] = useState<BoardSummary[] | null>(null)
-	// Most recently used first. Each id gets a <WarmBoard> keeping its store synced.
-	const [warmIds, setWarmIds] = useState<string[]>([])
+	// Boards whose connection failed; they reconnect when opened again.
+	const [failedIds, setFailedIds] = useState<ReadonlySet<string>>(new Set())
 	const [readyStores, setReadyStores] = useState<ReadonlyMap<string, TLStore>>(new Map())
 	// The board the user asked for, and the board whose store the editor has.
 	// They differ only while the target is still syncing; the editor keeps
@@ -60,27 +57,22 @@ export function App() {
 		return () => setEditor(null)
 	}, [])
 
-	// The shown and target boards must never be evicted from the warm set.
-	const pinnedIds = useRef<string[]>([])
-	pinnedIds.current = [shown?.id, targetId].filter((id) => id != null)
+	// Only the shown board is connected, plus the one being opened while it loads.
+	const connectedIds = [...new Set([shown?.id, targetId])].filter(
+		(id): id is string => id != null && !failedIds.has(id)
+	)
 
-	const warm = useCallback((boardId: string) => {
-		setWarmIds((ids) => {
-			const next = [boardId, ...ids.filter((id) => id !== boardId)].slice(0, MAX_WARM_BOARDS)
-			for (const id of pinnedIds.current) if (!next.includes(id)) next.push(id)
+	const open = useCallback((boardId: string) => {
+		setError(null)
+		setFailedIds((ids) => {
+			if (!ids.has(boardId)) return ids
+			const next = new Set(ids)
+			next.delete(boardId)
 			return next
 		})
+		setTargetId(boardId)
+		setView('opening')
 	}, [])
-
-	const open = useCallback(
-		(boardId: string) => {
-			setError(null)
-			setTargetId(boardId)
-			setView('opening')
-			warm(boardId)
-		},
-		[warm]
-	)
 
 	const handleReady = useCallback((boardId: string, store: TLStore | null) => {
 		setReadyStores((prev) => {
@@ -92,7 +84,7 @@ export function App() {
 	}, [])
 
 	const handleError = useCallback((boardId: string, err: Error) => {
-		setWarmIds((ids) => ids.filter((id) => id !== boardId))
+		setFailedIds((ids) => new Set(ids).add(boardId))
 		setTargetId((target) => {
 			if (target !== boardId) return target
 			setError(`Couldn't open board: ${err.message}`)
@@ -130,6 +122,8 @@ export function App() {
 
 	useEffect(() => () => stopTrackingSession.current?.(), [])
 
+	useEffect(() => window.localdraw.onGoHome(() => setView('home')), [])
+
 	// Show the editor once the requested board is in it.
 	useEffect(() => {
 		if (view === 'opening' && shown && shown.id === targetId) setView('board')
@@ -157,15 +151,40 @@ export function App() {
 		}
 	}
 
+	async function renameShownBoard(title: string) {
+		if (!shown) return
+		const boardId = shown.id
+		// Show the new name immediately; reload the list if saving fails.
+		setBoards((list) => list?.map((board) => (board.id === boardId ? { ...board, title } : board)) ?? list)
+		try {
+			await window.localdraw.renameBoard(boardId, title)
+		} catch (err) {
+			console.error(err)
+			window.localdraw.listBoards().then(setBoards, console.error)
+		}
+	}
+
 	const pendingId = targetId && targetId !== shown?.id ? targetId : null
 	const shownTitle = shown ? (boards?.find((board) => board.id === shown.id)?.title ?? 'Untitled') : null
 	// While a board loads, stay on home if that's where it was opened from; on launch show nothing.
 	const showEditor = view === 'board' && shown
 	const showHome = view === 'home' || (view === 'opening' && shown)
 
+	// The native title bar is hidden, but the window title still names the window in
+	// Mission Control, the Window menu and the Dock.
+	const windowTitle = showEditor && shownTitle ? `${shownTitle} — Localdraw` : 'Localdraw'
+	useEffect(() => {
+		document.title = windowTitle
+	}, [windowTitle])
+
 	return (
 		<div className="app">
-			<Toolbar isHome={!showEditor} title={showEditor ? shownTitle : null} onHome={() => setView('home')} />
+			<Toolbar
+				isHome={!showEditor}
+				title={showEditor ? shownTitle : null}
+				onHome={() => setView('home')}
+				onRename={renameShownBoard}
+			/>
 			<main className="main">
 				{showEditor ? (
 					<Tldraw
@@ -183,13 +202,12 @@ export function App() {
 						pendingId={pendingId}
 						error={error}
 						onOpen={open}
-						onWarm={warm}
 						onCreate={createBoard}
 					/>
 				) : null}
 			</main>
-			{warmIds.map((id) => (
-				<WarmBoard key={id} boardId={id} onReady={handleReady} onError={handleError} />
+			{connectedIds.map((id) => (
+				<BoardSync key={id} boardId={id} onReady={handleReady} onError={handleError} />
 			))}
 		</div>
 	)

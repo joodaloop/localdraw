@@ -23,6 +23,7 @@ export interface AssetInfo {
 export interface BackendMethods {
 	listBoards(): BoardSummary[]
 	createBoard(): BoardSummary
+	renameBoard(boardId: string, title: string): void
 	putAsset(upload: AssetUpload): Promise<{ hash: string }>
 	getAssetInfo(hash: string): AssetInfo | null
 	/** The board's tldraw session snapshot (validated and migrated by tldraw on load). */
@@ -38,6 +39,7 @@ export type BackendMethod = keyof BackendMethods
 export const RENDERER_METHODS = [
 	'listBoards',
 	'createBoard',
+	'renameBoard',
 	'putAsset',
 	'getSession',
 	'saveSession',
@@ -69,13 +71,23 @@ export interface BoardConnectionHandlers {
 export interface LocaldrawApi {
 	listBoards(): Promise<BoardSummary[]>
 	createBoard(): Promise<BoardSummary>
+	renameBoard(boardId: string, title: string): Promise<void>
 	putAsset(upload: AssetUpload): Promise<{ hash: string }>
 	getSession(boardId: string): Promise<unknown>
 	saveSession(boardId: string, state: unknown): Promise<void>
 	getLastBoardId(): Promise<string | null>
+	getMemoryUsage(): Promise<MemoryUsage>
 	/** Fetches a web page's title, description and preview images, for bookmark cards. */
 	unfurl(url: string): Promise<LinkPreview>
 	connectBoard(boardId: string, sessionId: string, handlers: BoardConnectionHandlers): BoardConnection
+	/** Subscribes to the File → Go Home menu command. Returns an unsubscribe function. */
+	onGoHome(callback: () => void): () => void
+}
+
+/** Resident memory ("Real Memory" in Activity Monitor) across all of the app's processes. */
+export interface MemoryUsage {
+	totalBytes: number
+	processes: { name: string; bytes: number }[]
 }
 
 export interface LinkPreview {

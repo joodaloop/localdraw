@@ -15,7 +15,7 @@ import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { pathToFileURL } from 'node:url'
-import { RENDERER_METHODS, type RendererMethod } from '../shared/api'
+import { RENDERER_METHODS, type MemoryUsage, type RendererMethod } from '../shared/api'
 import { assetFilePath, isAssetHash } from '../shared/asset-files'
 import { BackendProcess } from './backend-process'
 import { unfurl } from './unfurl'
@@ -24,11 +24,20 @@ const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
 const RENDERER_DIR = path.join(__dirname, '../renderer')
 const APP_ORIGIN = DEV_SERVER_URL ? originOf(DEV_SERVER_URL) : 'localdraw://app'
 
-// Development gets its own data folder (…/Application Support/localdraw-dev), so
-// work-in-progress code never touches the boards in your real one. This must run
-// before anything reads userData, including the single-instance lock below, which
-// is per data folder: dev and the built app can therefore run side by side.
-if (DEV_SERVER_URL) app.setPath('userData', path.join(app.getPath('appData'), 'localdraw-dev'))
+// Data lives in …/Application Support/localdraw, or localdraw-dev in development so
+// work-in-progress code never touches your real boards. Set explicitly because the
+// default follows the product name ("Localdraw"). This must run before anything
+// reads userData, including the single-instance lock below, which is per data
+// folder: dev and the built app can therefore run side by side.
+app.setPath('userData', path.join(app.getPath('appData'), DEV_SERVER_URL ? 'localdraw-dev' : 'localdraw'))
+
+app.setAboutPanelOptions({
+	applicationName: 'Localdraw',
+	applicationVersion: app.getVersion(),
+	version: '', // the build number line; we have none
+	copyright: `© ${new Date().getFullYear()} joodaloop. MIT License.`,
+	credits: 'Built on the tldraw SDK (tldraw.dev), used under the tldraw license.',
+})
 
 // Two app instances would each run their own sync rooms against the same
 // database and silently diverge, so only ever run one.
@@ -51,6 +60,16 @@ Menu.setApplicationMenu(
 	process.platform === 'darwin'
 		? Menu.buildFromTemplate([
 				{ role: 'appMenu' },
+				{
+					label: 'File',
+					submenu: [
+						{
+							label: 'Go Home',
+							accelerator: 'CmdOrCtrl+Shift+H',
+							click: (_item, win) => (win instanceof BrowserWindow ? win.webContents.send('go-home') : undefined),
+						},
+					],
+				},
 				{ label: 'Edit', submenu: [{ role: 'cut' }, { role: 'copy' }, { role: 'paste' }] },
 				{
 					label: 'View',
@@ -170,6 +189,12 @@ function createWindow() {
 	})
 	win.once('ready-to-show', () => win.show())
 
+	// The toolbar leaves room for the traffic lights, which macOS hides in full screen.
+	const sendFullScreen = () => win.webContents.send('full-screen', win.isFullScreen())
+	win.on('enter-full-screen', sendFullScreen)
+	win.on('leave-full-screen', sendFullScreen)
+	win.webContents.on('did-finish-load', sendFullScreen)
+
 	// The app never opens its own windows or navigates away; external links go to the browser.
 	win.webContents.setWindowOpenHandler(({ url }) => {
 		if (/^https?:\/\//.test(url)) void shell.openExternal(url)
@@ -197,6 +222,18 @@ ipcMain.handle('unfurl', (event, url: unknown) => {
 	return unfurl(url)
 })
 
+const PROCESS_NAMES: Record<string, string> = { Browser: 'Main', Tab: 'Page', GPU: 'GPU' }
+
+ipcMain.handle('memory-usage', (event): MemoryUsage => {
+	if (!isTrustedSender(event)) throw new Error('Untrusted sender')
+	const processes = app.getAppMetrics().map((metric) => ({
+		name: PROCESS_NAMES[metric.type] ?? metric.name ?? metric.serviceName ?? metric.type,
+		bytes: metric.memory.workingSetSize * 1024, // reported in KB
+	}))
+	processes.sort((a, b) => b.bytes - a.bytes)
+	return { totalBytes: processes.reduce((sum, p) => sum + p.bytes, 0), processes }
+})
+
 // The renderer hands us one end of a MessageChannel per open board; we pass it
 // straight to the backend so sync traffic flows renderer <-> backend directly.
 ipcMain.on('connect-board', (event, msg: { boardId?: unknown; sessionId?: unknown } | undefined) => {
@@ -218,6 +255,9 @@ app.on('second-instance', () => {
 
 app.whenReady().then(() => {
 	backend.start()
+
+	// In development the Dock shows Electron's own bundle; give it our icon at least.
+	if (DEV_SERVER_URL && process.platform === 'darwin') app.dock?.setIcon(path.join(__dirname, '../../build/icon.png'))
 
 	protocol.handle('localdraw', (request) => {
 		const url = new URL(request.url)

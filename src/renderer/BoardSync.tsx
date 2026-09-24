@@ -6,7 +6,7 @@ import { BoardSocket } from './board-socket'
 import { allAssetUtils, allShapeUtils } from './media'
 import { preloadSession } from './sessions'
 
-interface WarmBoardProps {
+interface BoardSyncProps {
 	boardId: string
 	/** Called with the synced store once it (and its saved view state) is ready, and with null on teardown. */
 	onReady(boardId: string, store: TLStore | null): void
@@ -14,10 +14,10 @@ interface WarmBoardProps {
 }
 
 /**
- * Renders nothing: keeps one board's store connected and synced so the editor
- * can switch to it instantly. Unmounting closes the connection.
+ * Renders nothing: keeps one board's store connected to the backend and synced.
+ * Unmounting closes the connection.
  */
-export function WarmBoard({ boardId, onReady, onError }: WarmBoardProps) {
+export function BoardSync({ boardId, onReady, onError }: BoardSyncProps) {
 	const connect = useCallback(
 		({ sessionId }: { sessionId: string }) => new BoardSocket(boardId, sessionId),
 		[boardId]

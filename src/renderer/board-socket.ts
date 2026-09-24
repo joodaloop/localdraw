@@ -54,7 +54,7 @@ export class BoardSocket implements TLPersistentClientSocket<ClientMessage, Serv
 				this.connection = null
 				// No retrying: the backend only closes a board's port when it can't serve it
 				// (unknown board, backend restart). Report an error so the board is dropped
-				// from the warm set; opening it again makes a fresh connection.
+				// from the connected set; opening it again makes a fresh connection.
 				this.setStatus({ status: 'error', reason: 'The board connection was closed' })
 			},
 		})

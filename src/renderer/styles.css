@@ -1,81 +1,85 @@
 :root {
-	--bg: #f9fafb;
-	--surface: #ffffff;
-	--text: #1d1d1f;
-	--muted: #6b6b70;
-	--border: #e3e3e6;
-	--accent: #2f80ed;
-	--accent-text: #ffffff;
-	color-scheme: light dark;
-	font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --bg: #f9fafb;
+  --surface: #ffffff;
+  --text: #1d1d1f;
+  --muted: #6b6b70;
+  --border: #e3e3e6;
+  --accent: #2f80ed;
+  --accent-text: #ffffff;
+  color-scheme: light dark;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
-	:root {
-		--bg: #101011;
-		--surface: #1b1b1d;
-		--text: #f2f2f3;
-		--muted: #9a9aa1;
-		--border: #2c2c30;
-	}
+  :root {
+    --bg: #101011;
+    --surface: #1b1b1d;
+    --text: #f2f2f3;
+    --muted: #9a9aa1;
+    --border: #2c2c30;
+  }
 }
 
 *,
 *::before,
 *::after {
-	box-sizing: border-box;
+  box-sizing: border-box;
 }
 
 html,
 body,
 #root {
-	height: 100%;
-	margin: 0;
+  height: 100%;
+  margin: 0;
 }
 
 body {
-	background: var(--bg);
-	color: var(--text);
+  background: var(--bg);
+  color: var(--text);
 }
 
 button {
-	font: inherit;
-	color: inherit;
-	cursor: pointer;
-	border: 1px solid var(--border);
-	border-radius: 8px;
-	background: var(--surface);
-	padding: 6px 12px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 6px 12px;
 }
 
 button.primary {
-	background: var(--accent);
-	border-color: var(--accent);
-	color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
 }
 
 button:disabled {
-	opacity: 0.6;
-	cursor: default;
+  opacity: 0.6;
+  cursor: default;
 }
 
 /* layout */
 
 :root {
-	--toolbar-height: 40px;
+  --toolbar-height: 40px;
 }
 
 .app {
-	height: 100%;
-	display: grid;
-	grid-template-rows: var(--toolbar-height) minmax(0, 1fr);
+  height: 100%;
+  display: grid;
+  grid-template-rows: var(--toolbar-height) minmax(0, 1fr);
 }
 
 .main {
-	position: relative;
-	min-width: 0;
-	min-height: 0;
-	overflow: auto;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
 }
 
 /* toolbar */
@@ -83,187 +87,282 @@ button:disabled {
 /* The toolbar is the window's drag handle (the native title bar is hidden).
    Drag regions swallow clicks, so its buttons opt out. */
 .toolbar {
-	display: grid;
-	grid-template-columns: 1fr auto 1fr;
-	align-items: stretch;
-	border-bottom: 1px solid var(--border);
-	background: var(--bg);
-	-webkit-app-region: drag;
-	user-select: none;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  -webkit-app-region: drag;
+  user-select: none;
 }
 
-/* Leave room for the macOS traffic lights (positioned in main.ts). */
-:root[data-platform='darwin'] .toolbar-start {
-	padding-left: 78px;
+/* Leave room for the macOS traffic lights (positioned in main.ts), which are hidden in full screen. */
+:root[data-platform="darwin"]:not([data-full-screen]) .toolbar-start {
+  padding-left: 78px;
 }
 
 .toolbar-start {
-	display: flex;
-	align-items: stretch;
+  display: flex;
+  align-items: stretch;
 }
 
 .toolbar button {
-	-webkit-app-region: no-drag;
-	display: flex;
-	align-items: center;
-	border: none;
-	border-radius: 0;
-	background: transparent;
-	color: var(--muted);
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
 }
 
 .toolbar .toolbar-home {
-	width: 48px;
-	justify-content: center;
-	border-left: 1px solid var(--border);
-	border-right: 1px solid var(--border);
+  width: 48px;
+  justify-content: center;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
 }
 
 .toolbar .toolbar-home[aria-current] {
-	background: var(--surface);
-	color: var(--text);
+  background: var(--surface);
+  color: var(--text);
 }
 
 .toolbar-title {
-	align-self: center;
-	max-width: 50vw;
-	font-size: 13px;
-	font-weight: 600;
-	overflow: hidden;
-	white-space: nowrap;
-	text-overflow: ellipsis;
+  align-self: center;
+  max-width: 50vw;
+  padding: 2px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  /* Drag regions swallow double-clicks (they zoom the window instead), so the
+	   title opts out to be renamable. The rest of the toolbar still drags. */
+  -webkit-app-region: no-drag;
+}
+
+.toolbar-title-input {
+  field-sizing: content;
+  min-width: 80px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  outline: none;
+}
+
+.toolbar-end {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 12px;
+}
+
+.memory-meter {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.toolbar .memory-meter button {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.toolbar .memory-meter button:hover,
+.toolbar .memory-meter button[aria-expanded="true"] {
+  background: var(--surface);
+}
+
+.toolbar .memory-meter button[data-level="low"] {
+  color: #1e8e3e;
+}
+
+.toolbar .memory-meter button[data-level="high"] {
+  color: #d93025;
+}
+
+.memory-popover {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  z-index: 1000; /* above tldraw's UI */
+  width: 260px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.15);
+  font-size: 12px;
+  cursor: default;
+  -webkit-app-region: no-drag;
+  user-select: text;
+}
+
+.memory-popover table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.memory-popover td {
+  padding: 2px 0;
+}
+
+.memory-popover td:last-child {
+  text-align: right;
+}
+
+.memory-popover tfoot td {
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  font-weight: 600;
+}
+
+.memory-popover p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  line-height: 1.4;
 }
 
 /* home */
 
 .home {
-	max-width: 960px;
-	margin: 0 auto;
-	padding: 32px 24px;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 32px 24px;
 }
 
 .home-header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
 }
 
 .home-header h1 {
-	margin: 0;
-	font-size: 20px;
+  margin: 0;
+  font-size: 20px;
 }
 
 .home-empty {
-	color: var(--muted);
+  color: var(--muted);
 }
 
 .home-error {
-	color: #d93025;
-	font-size: 13px;
+  color: #d93025;
+  font-size: 13px;
 }
 
 .board-grid {
-	list-style: none;
-	margin: 0;
-	padding: 0;
-	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-	gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
 }
 
 .board-grid button {
-	width: 100%;
-	height: 96px;
-	display: flex;
-	flex-direction: column;
-	justify-content: flex-end;
-	gap: 4px;
-	padding: 12px 14px;
-	text-align: left;
+  width: 100%;
+  height: 96px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 12px 14px;
+  text-align: left;
 }
 
 .board-grid button:hover {
-	border-color: var(--accent);
+  border-color: var(--accent);
 }
 
 /* Only show a loading hint if opening takes long enough to notice. */
 .board-grid button[data-pending] .board-title::after {
-	content: ' …';
-	opacity: 0;
-	animation: appear 0s 300ms forwards;
+  content: " …";
+  opacity: 0;
+  animation: appear 0s 300ms forwards;
 }
 
 @keyframes appear {
-	to {
-		opacity: 1;
-	}
+  to {
+    opacity: 1;
+  }
 }
 
 .board-title {
-	font-size: 14px;
-	font-weight: 500;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .board-date {
-	color: var(--muted);
-	font-size: 12px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 /* file shapes (PDF, audio) */
 
 .file-card {
-	width: 100%;
-	height: 100%;
-	display: flex;
-	flex-direction: column;
-	justify-content: center;
-	gap: 8px;
-	padding: 12px;
-	border: 1px solid var(--tl-color-low-border);
-	border-radius: 8px;
-	background: var(--tl-color-low);
-	color: var(--tl-color-text-1);
-	font-family: var(--tl-font-sans, system-ui);
-	overflow: hidden;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--tl-color-low-border);
+  border-radius: 8px;
+  background: var(--tl-color-low);
+  color: var(--tl-color-text-1);
+  font-family: var(--tl-font-sans, system-ui);
+  overflow: hidden;
 }
 
 .file-card-row {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
 .file-card-badge {
-	flex: none;
-	padding: 4px 6px;
-	border-radius: 4px;
-	background: var(--tl-color-text-1);
-	color: var(--tl-color-background);
-	font-size: 11px;
-	font-weight: 700;
-	text-transform: uppercase;
+  flex: none;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: var(--tl-color-text-1);
+  color: var(--tl-color-background);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 .file-card-text {
-	min-width: 0;
+  min-width: 0;
 }
 
 .file-card-name {
-	font-size: 14px;
-	font-weight: 600;
-	overflow: hidden;
-	white-space: nowrap;
-	text-overflow: ellipsis;
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .file-card-detail {
-	font-size: 12px;
-	color: var(--tl-color-text-3);
+  font-size: 12px;
+  color: var(--tl-color-text-3);
 }
 
 .file-card-audio {
-	width: 100%;
-	height: 36px;
+  width: 100%;
+  height: 36px;
 }
