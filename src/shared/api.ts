@@ -80,6 +80,8 @@ export interface LocaldrawApi {
 	/** Fetches a web page's title, description and preview images, for bookmark cards. */
 	unfurl(url: string): Promise<LinkPreview>
 	connectBoard(boardId: string, sessionId: string, handlers: BoardConnectionHandlers): BoardConnection
+	/** Appends a line to the app's error log file. */
+	logError(message: string): void
 	/** Subscribes to the File → Go Home menu command. Returns an unsubscribe function. */
 	onGoHome(callback: () => void): () => void
 }

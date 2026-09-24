@@ -18,6 +18,7 @@ import { pathToFileURL } from 'node:url'
 import { RENDERER_METHODS, type MemoryUsage, type RendererMethod } from '../shared/api'
 import { assetFilePath, isAssetHash } from '../shared/asset-files'
 import { BackendProcess } from './backend-process'
+import { initLog, logError } from './log'
 import { unfurl } from './unfurl'
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
@@ -30,6 +31,7 @@ const APP_ORIGIN = DEV_SERVER_URL ? originOf(DEV_SERVER_URL) : 'localdraw://app'
 // reads userData, including the single-instance lock below, which is per data
 // folder: dev and the built app can therefore run side by side.
 app.setPath('userData', path.join(app.getPath('appData'), DEV_SERVER_URL ? 'localdraw-dev' : 'localdraw'))
+initLog(path.join(app.getPath('userData'), 'logs'))
 
 app.setAboutPanelOptions({
 	applicationName: 'Localdraw',
@@ -188,6 +190,9 @@ function createWindow() {
 		},
 	})
 	win.once('ready-to-show', () => win.show())
+	win.webContents.on('render-process-gone', (_event, { reason, exitCode }) => {
+		logError('main', `renderer process gone: ${reason} (exit code ${exitCode})`)
+	})
 
 	// The toolbar leaves room for the traffic lights, which macOS hides in full screen.
 	const sendFullScreen = () => win.webContents.send('full-screen', win.isFullScreen())
@@ -220,6 +225,11 @@ ipcMain.handle('unfurl', (event, url: unknown) => {
 	if (!isTrustedSender(event)) throw new Error('Untrusted sender')
 	if (typeof url !== 'string') throw new Error('Expected a URL')
 	return unfurl(url)
+})
+
+ipcMain.on('log-error', (event, message: unknown) => {
+	if (!isTrustedSender(event) || typeof message !== 'string') return
+	logError('renderer', message.slice(0, 10_000))
 })
 
 const PROCESS_NAMES: Record<string, string> = { Browser: 'Main', Tab: 'Page', GPU: 'GPU' }

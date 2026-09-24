@@ -10,6 +10,8 @@ interface BoardSyncProps {
 	boardId: string
 	/** Called with the synced store once it (and its saved view state) is ready, and with null on teardown. */
 	onReady(boardId: string, store: TLStore | null): void
+	/** Called with true while the board is reconnecting (edits are kept until it's back), and false once online. */
+	onOffline(boardId: string, isOffline: boolean): void
 	onError(boardId: string, error: Error): void
 }
 
@@ -17,7 +19,7 @@ interface BoardSyncProps {
  * Renders nothing: keeps one board's store connected to the backend and synced.
  * Unmounting closes the connection.
  */
-export function BoardSync({ boardId, onReady, onError }: BoardSyncProps) {
+export function BoardSync({ boardId, onReady, onOffline, onError }: BoardSyncProps) {
 	const connect = useCallback(
 		({ sessionId }: { sessionId: string }) => new BoardSocket(boardId, sessionId),
 		[boardId]
@@ -25,6 +27,7 @@ export function BoardSync({ boardId, onReady, onError }: BoardSyncProps) {
 	const result = useSync({ connect, assets: assetStore, shapeUtils: allShapeUtils, assetUtils: allAssetUtils })
 	const store = result.status === 'synced-remote' ? result.store : null
 	const error = result.status === 'error' ? result.error : null
+	const isOffline = result.status === 'synced-remote' && result.connectionStatus === 'offline'
 
 	useEffect(() => {
 		if (!store) return
@@ -39,6 +42,12 @@ export function BoardSync({ boardId, onReady, onError }: BoardSyncProps) {
 			onReady(boardId, null)
 		}
 	}, [boardId, store, onReady])
+
+	useEffect(() => {
+		if (!isOffline) return
+		onOffline(boardId, true)
+		return () => onOffline(boardId, false)
+	}, [boardId, isOffline, onOffline])
 
 	useEffect(() => {
 		if (error) onError(boardId, error)

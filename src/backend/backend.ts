@@ -112,6 +112,8 @@ function getRoom(boardId: string): TLSocketRoom {
 	const room = new TLSocketRoom({
 		schema,
 		storage,
+		// Goes to stderr, which the main process copies into the log file.
+		log: { warn: console.warn, error: console.error },
 		onSessionRemoved(room, { numSessionsRemaining }) {
 			if (numSessionsRemaining > 0) return
 			room.close()
@@ -154,6 +156,7 @@ class PortSocket implements WebSocketMinimal {
 
 function connectBoard(boardId: string, sessionId: string, port: MessagePortMain) {
 	if (!isBoardId(boardId) || !stmts.boardExists.get(boardId) || typeof sessionId !== 'string') {
+		console.error(`refused connection to unknown board ${String(boardId)}`)
 		port.close()
 		return
 	}

@@ -1,16 +1,20 @@
 import { useEffect, useState } from 'react'
 import { MemoryMeter } from './MemoryMeter'
+import { SyncStatus, type SyncState } from './SyncStatus'
 
 interface ToolbarProps {
 	isHome: boolean
 	/** The name of the board being shown, if any. */
 	title: string | null
+	/** Connection trouble for the shown board, if any. */
+	syncState: SyncState | null
+	onRetrySync(): void
 	onHome(): void
 	onRename(title: string): void
 }
 
 /** The app's title bar: spans the window and doubles as its drag handle. */
-export function Toolbar({ isHome, title, onHome, onRename }: ToolbarProps) {
+export function Toolbar({ isHome, title, syncState, onRetrySync, onHome, onRename }: ToolbarProps) {
 	const [isRenaming, setIsRenaming] = useState(false)
 	// Leaving the board mid-edit (e.g. going home) unmounts the input without a blur: drop the edit.
 	useEffect(() => {
@@ -55,6 +59,7 @@ export function Toolbar({ isHome, title, onHome, onRename }: ToolbarProps) {
 				</div>
 			)}
 			<div className="toolbar-end">
+				<SyncStatus state={syncState} onRetry={onRetrySync} />
 				<MemoryMeter />
 			</div>
 		</header>

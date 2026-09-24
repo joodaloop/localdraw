@@ -160,7 +160,24 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 4px;
   padding-right: 12px;
+}
+
+.toolbar .sync-status {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.toolbar .sync-status[data-state="failed"] {
+  color: #d93025;
+  cursor: pointer;
+}
+
+.toolbar .sync-status[data-state="failed"]:hover {
+  background: var(--surface);
 }
 
 .memory-meter {

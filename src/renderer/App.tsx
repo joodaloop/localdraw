@@ -1,4 +1,5 @@
 import { getAssetUrlsByImport } from '@tldraw/assets/imports.vite'
+import { TLRemoteSyncError } from '@tldraw/sync'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createTLStore, Tldraw, type Editor, type TLStore } from 'tldraw'
 import type { BoardSummary } from '../shared/api'
@@ -10,6 +11,7 @@ import { getSavedSession, trackSession } from './sessions'
 import { Home } from './Home'
 import { Toolbar } from './Toolbar'
 import { BoardSync } from './BoardSync'
+import type { SyncState } from './SyncStatus'
 
 // Bundle tldraw's fonts, icons and translations instead of loading them from its CDN.
 // Vite already resolves these to absolute localdraw:// URLs, which tldraw's default
@@ -31,8 +33,10 @@ interface ShownBoard {
 
 export function App() {
 	const [boards, setBoards] = useState<BoardSummary[] | null>(null)
-	// Boards whose connection failed; they reconnect when opened again.
-	const [failedIds, setFailedIds] = useState<ReadonlySet<string>>(new Set())
+	// Boards whose connection failed, with the reason; they reconnect when opened again (or retried).
+	const [failures, setFailures] = useState<ReadonlyMap<string, string>>(new Map())
+	// Boards currently reconnecting; their edits are kept and sent once they're back.
+	const [offlineIds, setOfflineIds] = useState<ReadonlySet<string>>(new Set())
 	const [readyStores, setReadyStores] = useState<ReadonlyMap<string, TLStore>>(new Map())
 	// The board the user asked for, and the board whose store the editor has.
 	// They differ only while the target is still syncing; the editor keeps
@@ -49,6 +53,9 @@ export function App() {
 	)
 	const [editor, setEditor] = useState<Editor | null>(null)
 	const stopTrackingSession = useRef<(() => void) | null>(null)
+	// For callbacks that need current state without being recreated on every change.
+	const latest = useRef({ boards, targetId, shownId: shown?.id })
+	latest.current = { boards, targetId, shownId: shown?.id }
 
 	// The editor is unmounted while home is showing; boards are then swapped into the store alone.
 	const handleMount = useCallback((editor: Editor) => {
@@ -59,20 +66,28 @@ export function App() {
 
 	// Only the shown board is connected, plus the one being opened while it loads.
 	const connectedIds = [...new Set([shown?.id, targetId])].filter(
-		(id): id is string => id != null && !failedIds.has(id)
+		(id): id is string => id != null && !failures.has(id)
 	)
 
-	const open = useCallback((boardId: string) => {
+	/** (Re)connects a board and makes it the target; it's swapped into the editor once synced. */
+	const connect = useCallback((boardId: string) => {
 		setError(null)
-		setFailedIds((ids) => {
-			if (!ids.has(boardId)) return ids
-			const next = new Set(ids)
+		setFailures((prev) => {
+			if (!prev.has(boardId)) return prev
+			const next = new Map(prev)
 			next.delete(boardId)
 			return next
 		})
 		setTargetId(boardId)
-		setView('opening')
 	}, [])
+
+	const open = useCallback(
+		(boardId: string) => {
+			connect(boardId)
+			setView('opening')
+		},
+		[connect]
+	)
 
 	const handleReady = useCallback((boardId: string, store: TLStore | null) => {
 		setReadyStores((prev) => {
@@ -83,15 +98,37 @@ export function App() {
 		})
 	}, [])
 
-	const handleError = useCallback((boardId: string, err: Error) => {
-		setFailedIds((ids) => new Set(ids).add(boardId))
-		setTargetId((target) => {
-			if (target !== boardId) return target
-			setError(`Couldn't open board: ${err.message}`)
-			setView((view) => (view === 'opening' ? 'home' : view))
-			return null
+	const handleOffline = useCallback((boardId: string, isOffline: boolean) => {
+		setOfflineIds((prev) => {
+			if (prev.has(boardId) === isOffline) return prev
+			const next = new Set(prev)
+			if (isOffline) next.add(boardId)
+			else next.delete(boardId)
+			return next
 		})
 	}, [])
+
+	const handleError = useCallback((boardId: string, err: Error) => {
+		const reason = err instanceof TLRemoteSyncError ? err.reason : err.message
+		window.localdraw.logError(`board ${boardId} failed: ${reason}`)
+		setFailures((prev) => new Map(prev).set(boardId, reason))
+
+		const { boards, targetId, shownId } = latest.current
+		if (targetId !== boardId) return
+		const title = boards?.find((board) => board.id === boardId)?.title ?? 'Untitled'
+		if (shownId === boardId) {
+			// The editor keeps showing it, read-only, and the toolbar offers a retry.
+			setError(`Lost the connection to “${title}”: ${reason}`)
+		} else {
+			setError(`Couldn't open “${title}”: ${reason}`)
+			setTargetId(null)
+			setView((view) => (view === 'opening' ? 'home' : view))
+		}
+	}, [])
+
+	const retryShownBoard = useCallback(() => {
+		if (shown) connect(shown.id)
+	}, [shown, connect])
 
 	// On launch, reopen the board viewed last.
 	useEffect(() => {
@@ -121,6 +158,15 @@ export function App() {
 	}, [targetId, readyStores, shown, editor, editorStore])
 
 	useEffect(() => () => stopTrackingSession.current?.(), [])
+
+	// A failed board's edits can't be saved, so stop taking them until it's back. After a
+	// retry the editor still holds the dead store until the fresh one is swapped in.
+	const shownFailure = shown ? (failures.get(shown.id) ?? null) : null
+	const isShownStale = shown != null && shown.id === targetId && readyStores.get(shown.id) !== shown.store
+	const isReadonly = shownFailure !== null || isShownStale
+	useEffect(() => {
+		editor?.updateInstanceState({ isReadonly })
+	}, [editor, isReadonly])
 
 	useEffect(() => window.localdraw.onGoHome(() => setView('home')), [])
 
@@ -169,6 +215,13 @@ export function App() {
 	// While a board loads, stay on home if that's where it was opened from; on launch show nothing.
 	const showEditor = view === 'board' && shown
 	const showHome = view === 'home' || (view === 'opening' && shown)
+	const syncState: SyncState | null = !showEditor
+		? null
+		: shownFailure !== null
+			? { status: 'failed', reason: shownFailure }
+			: offlineIds.has(shown.id) || isShownStale
+				? { status: 'reconnecting' }
+				: null
 
 	// The native title bar is hidden, but the window title still names the window in
 	// Mission Control, the Window menu and the Dock.
@@ -182,6 +235,8 @@ export function App() {
 			<Toolbar
 				isHome={!showEditor}
 				title={showEditor ? shownTitle : null}
+				syncState={syncState}
+				onRetrySync={retryShownBoard}
 				onHome={() => setView('home')}
 				onRename={renameShownBoard}
 			/>
@@ -195,6 +250,8 @@ export function App() {
 						maxAssetSize={MAX_ASSET_SIZE}
 						assetUrls={assetUrls}
 						licenseKey={licenseKey}
+						// Follow the OS theme like the rest of the app; a choice in tldraw's menu still wins.
+						colorScheme="system"
 					/>
 				) : showHome ? (
 					<Home
@@ -207,7 +264,7 @@ export function App() {
 				) : null}
 			</main>
 			{connectedIds.map((id) => (
-				<BoardSync key={id} boardId={id} onReady={handleReady} onError={handleError} />
+				<BoardSync key={id} boardId={id} onReady={handleReady} onOffline={handleOffline} onError={handleError} />
 			))}
 		</div>
 	)

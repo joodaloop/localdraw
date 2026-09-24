@@ -11,6 +11,7 @@ const api: LocaldrawApi = {
 	getLastBoardId: () => ipcRenderer.invoke('backend', 'getLastBoardId'),
 	unfurl: (url) => ipcRenderer.invoke('unfurl', url),
 	getMemoryUsage: () => ipcRenderer.invoke('memory-usage'),
+	logError: (message) => ipcRenderer.send('log-error', message),
 
 	onGoHome(callback) {
 		const listener = () => callback()

@@ -1,6 +1,8 @@
 import { utilityProcess, type MessagePortMain, type UtilityProcess } from 'electron'
 import path from 'node:path'
+import { createInterface } from 'node:readline'
 import type { BackendMethods, BackendMethod, BackendRequest, BackendResponse } from '../shared/api'
+import { logError } from './log'
 
 interface Pending {
 	resolve(value: unknown): void
@@ -22,8 +24,10 @@ export class BackendProcess {
 	start() {
 		const child = utilityProcess.fork(path.join(__dirname, 'backend.cjs'), [this.dbPath, this.assetsDir], {
 			serviceName: 'Localdraw Backend',
-			stdio: 'inherit',
+			// Piped so its stderr (uncaught errors, sync room errors) reaches the log file.
+			stdio: ['ignore', 'inherit', 'pipe'],
 		})
+		if (child.stderr) createInterface({ input: child.stderr }).on('line', (line) => logError('backend', line))
 		child.on('message', (msg: BackendResponse) => {
 			const pending = this.pending.get(msg.id)
 			if (!pending) return
@@ -36,7 +40,7 @@ export class BackendProcess {
 			for (const { reject } of this.pending.values()) reject(new Error('backend exited'))
 			this.pending.clear()
 			if (!this.stopping) {
-				console.error(`backend exited with code ${code}, restarting`)
+				logError('main', `backend exited with code ${code}, restarting`)
 				this.start()
 			}
 		})
