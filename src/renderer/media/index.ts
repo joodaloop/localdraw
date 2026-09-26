@@ -1,5 +1,5 @@
 import { defaultAssetUtils, defaultShapeUtils } from 'tldraw'
-import { IconShapeUtil } from '../icons/IconShapeUtil'
+import { IconShapeUtil } from '../icon-shapes/IconShapeUtil'
 import { AudioAssetUtil, PdfAssetUtil } from './file-assets'
 import { AudioShapeUtil, PdfShapeUtil } from './file-shapes'
 

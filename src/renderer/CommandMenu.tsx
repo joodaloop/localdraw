@@ -1,7 +1,7 @@
 import { Command } from 'cmdk'
 import { useEffect, useRef, useState } from 'react'
 import type { BoardSummary } from '../shared/api'
-import { IconGrid, type IconGridHandle } from './icons/IconGrid'
+import { IconGrid, type IconGridHandle } from './icon-shapes/IconGrid'
 
 const CREATE_VALUE = 'create'
 const INSERT_ICON_VALUE = 'insert-icon'
