@@ -32,5 +32,9 @@
     "tldraw": "5.4.2",
     "typescript": "^7.0.2",
     "vite": "^8.3.0"
+  },
+  "dependencies": {
+    "@tabler/icons-react": "^3.48.0",
+    "cmdk": "^1.1.1"
   }
 }

@@ -19,10 +19,18 @@ export interface AssetInfo {
 	size: number
 }
 
+export interface TextSearchResult {
+	boardId: string
+	shapeId: import('@tldraw/tlschema').TLShapeId
+	boardTitle: string
+	/** The full text of the matching shape, not just the matched fragment. */
+	text: string
+}
+
 /** Request/response methods implemented by the backend utility process. */
 export interface BackendMethods {
 	listBoards(): BoardSummary[]
-	createBoard(): BoardSummary
+	createBoard(title?: string): BoardSummary
 	renameBoard(boardId: string, title: string): void
 	putAsset(upload: AssetUpload): Promise<{ hash: string }>
 	getAssetInfo(hash: string): AssetInfo | null
@@ -31,6 +39,8 @@ export interface BackendMethods {
 	saveSession(boardId: string, state: unknown): void
 	/** The board viewed most recently, to reopen on launch. */
 	getLastBoardId(): string | null
+	/** Full-text search over every board's shape labels, newest-indexed match ranking first. */
+	searchText(query: string): TextSearchResult[]
 }
 
 export type BackendMethod = keyof BackendMethods
@@ -44,6 +54,7 @@ export const RENDERER_METHODS = [
 	'getSession',
 	'saveSession',
 	'getLastBoardId',
+	'searchText',
 ] as const satisfies readonly BackendMethod[]
 export type RendererMethod = (typeof RENDERER_METHODS)[number]
 
@@ -70,12 +81,13 @@ export interface BoardConnectionHandlers {
 /** The API the preload script exposes on `window.localdraw`. */
 export interface LocaldrawApi {
 	listBoards(): Promise<BoardSummary[]>
-	createBoard(): Promise<BoardSummary>
+	createBoard(title?: string): Promise<BoardSummary>
 	renameBoard(boardId: string, title: string): Promise<void>
 	putAsset(upload: AssetUpload): Promise<{ hash: string }>
 	getSession(boardId: string): Promise<unknown>
 	saveSession(boardId: string, state: unknown): Promise<void>
 	getLastBoardId(): Promise<string | null>
+	searchText(query: string): Promise<TextSearchResult[]>
 	getMemoryUsage(): Promise<MemoryUsage>
 	/** Fetches a web page's title, description and preview images, for bookmark cards. */
 	unfurl(url: string): Promise<LinkPreview>
@@ -84,6 +96,17 @@ export interface LocaldrawApi {
 	logError(message: string): void
 	/** Subscribes to the File → Go Home menu command. Returns an unsubscribe function. */
 	onGoHome(callback: () => void): () => void
+	/** Subscribes to the File → Open Board… menu command. Returns an unsubscribe function. */
+	onOpenBoardMenu(callback: () => void): () => void
+	/** Subscribes to the View → Next/Previous Tab menu commands (Ctrl+Tab / Ctrl+Shift+Tab). */
+	onNextTab(callback: () => void): () => void
+	onPrevTab(callback: () => void): () => void
+	/** Subscribes to the File → Close Tab menu command (Cmd/Ctrl+W). */
+	onCloseTab(callback: () => void): () => void
+	/** Subscribes to the File → Reopen Closed Tab menu command (Cmd/Ctrl+Shift+T). */
+	onReopenTab(callback: () => void): () => void
+	/** Subscribes to the View → Tab 1–9 menu commands (Cmd/Ctrl+1–9); 9 always means the last tab. */
+	onGotoTab(callback: (position: number) => void): () => void
 }
 
 /** Resident memory ("Real Memory" in Activity Monitor) across all of the app's processes. */

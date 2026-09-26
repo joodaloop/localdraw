@@ -3,12 +3,13 @@ import type { LocaldrawApi } from '../shared/api'
 
 const api: LocaldrawApi = {
 	listBoards: () => ipcRenderer.invoke('backend', 'listBoards'),
-	createBoard: () => ipcRenderer.invoke('backend', 'createBoard'),
+	createBoard: (title) => ipcRenderer.invoke('backend', 'createBoard', title),
 	renameBoard: (boardId, title) => ipcRenderer.invoke('backend', 'renameBoard', boardId, title),
 	putAsset: (upload) => ipcRenderer.invoke('backend', 'putAsset', upload),
 	getSession: (boardId) => ipcRenderer.invoke('backend', 'getSession', boardId),
 	saveSession: (boardId, state) => ipcRenderer.invoke('backend', 'saveSession', boardId, state),
 	getLastBoardId: () => ipcRenderer.invoke('backend', 'getLastBoardId'),
+	searchText: (query) => ipcRenderer.invoke('backend', 'searchText', query),
 	unfurl: (url) => ipcRenderer.invoke('unfurl', url),
 	getMemoryUsage: () => ipcRenderer.invoke('memory-usage'),
 	logError: (message) => ipcRenderer.send('log-error', message),
@@ -17,6 +18,42 @@ const api: LocaldrawApi = {
 		const listener = () => callback()
 		ipcRenderer.on('go-home', listener)
 		return () => void ipcRenderer.off('go-home', listener)
+	},
+
+	onOpenBoardMenu(callback) {
+		const listener = () => callback()
+		ipcRenderer.on('open-board-menu', listener)
+		return () => void ipcRenderer.off('open-board-menu', listener)
+	},
+
+	onNextTab(callback) {
+		const listener = () => callback()
+		ipcRenderer.on('next-tab', listener)
+		return () => void ipcRenderer.off('next-tab', listener)
+	},
+
+	onPrevTab(callback) {
+		const listener = () => callback()
+		ipcRenderer.on('prev-tab', listener)
+		return () => void ipcRenderer.off('prev-tab', listener)
+	},
+
+	onCloseTab(callback) {
+		const listener = () => callback()
+		ipcRenderer.on('close-tab', listener)
+		return () => void ipcRenderer.off('close-tab', listener)
+	},
+
+	onReopenTab(callback) {
+		const listener = () => callback()
+		ipcRenderer.on('reopen-tab', listener)
+		return () => void ipcRenderer.off('reopen-tab', listener)
+	},
+
+	onGotoTab(callback) {
+		const listener = (_event: unknown, position: number) => callback(position)
+		ipcRenderer.on('goto-tab', listener)
+		return () => void ipcRenderer.off('goto-tab', listener)
 	},
 
 	// MessagePorts can't cross the context bridge, so the preload keeps the port

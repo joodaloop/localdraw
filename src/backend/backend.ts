@@ -14,6 +14,7 @@ import {
 	type BackendRequest,
 	type BackendResponse,
 	type BoardSummary,
+	type TextSearchResult,
 } from '../shared/api'
 import { assetFilePath, isAssetHash } from '../shared/asset-files'
 import { createLocaldrawSchema } from '../shared/media-schema'
@@ -50,7 +51,59 @@ db.exec(`
 		state      TEXT NOT NULL,
 		updated_at INTEGER NOT NULL
 	) STRICT;
+
+	-- Plain text pulled out of every shape's label, one row per shape, kept in sync with each
+	-- board's own r_<id>_documents table (see reindexBoardText). Mirrored into an FTS5 index
+	-- below so home-page search can run across every board at once.
+	CREATE TABLE IF NOT EXISTS shape_text (
+		id       TEXT PRIMARY KEY, -- '<boardId>:<recordId>'
+		board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+		text     TEXT NOT NULL
+	) STRICT;
+	CREATE INDEX IF NOT EXISTS idx_shape_text_board_id ON shape_text(board_id);
+
 `)
+
+// Bump when shape_text_fts's DDL (tokenizer, columns, ...) needs to change: `user_version`
+// gates a one-time rebuild rather than paying for one on every launch. The reindex loop below
+// already repopulates `shape_text` from scratch each launch regardless, so once the FTS index
+// itself is at the current version there's nothing more to do here.
+const SHAPE_TEXT_FTS_VERSION = 1
+const { user_version: schemaVersion } = db.prepare('PRAGMA user_version').get() as { user_version: number }
+if (schemaVersion < SHAPE_TEXT_FTS_VERSION) {
+	db.exec(`
+		-- Drop the triggers before clearing the table: otherwise the DELETE fires the old
+		-- AFTER DELETE trigger, which asks the (about to be replaced) FTS index to remove
+		-- content it may not actually have — a mismatch FTS5 reports as "malformed".
+		DROP TRIGGER IF EXISTS shape_text_ai;
+		DROP TRIGGER IF EXISTS shape_text_ad;
+		DROP TRIGGER IF EXISTS shape_text_au;
+		DROP TABLE IF EXISTS shape_text_fts;
+		-- Rebuilt from scratch by the reindex loop below.
+		DELETE FROM shape_text;
+
+		-- Trigram supports true substring matches ("uly" finding "July"); a word-based
+		-- tokenizer (e.g. porter) only matches from the start of a word.
+		CREATE VIRTUAL TABLE shape_text_fts USING fts5(
+			text,
+			content = 'shape_text',
+			content_rowid = 'rowid',
+			tokenize = 'trigram'
+		);
+
+		CREATE TRIGGER shape_text_ai AFTER INSERT ON shape_text BEGIN
+			INSERT INTO shape_text_fts (rowid, text) VALUES (new.rowid, new.text);
+		END;
+		CREATE TRIGGER shape_text_ad AFTER DELETE ON shape_text BEGIN
+			INSERT INTO shape_text_fts (shape_text_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+		END;
+		CREATE TRIGGER shape_text_au AFTER UPDATE ON shape_text BEGIN
+			INSERT INTO shape_text_fts (shape_text_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+			INSERT INTO shape_text_fts (rowid, text) VALUES (new.rowid, new.text);
+		END;
+	`)
+	db.exec(`PRAGMA user_version = ${SHAPE_TEXT_FTS_VERSION}`)
+}
 
 moveAssetBlobsToDisk()
 
@@ -87,10 +140,145 @@ const stmts = {
 		 ON CONFLICT (board_id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`
 	),
 	lastBoardId: db.prepare('SELECT board_id FROM sessions ORDER BY updated_at DESC LIMIT 1'),
+	listBoardIds: db.prepare('SELECT id FROM boards'),
+	tableExists: db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?"),
+	deleteShapeText: db.prepare('DELETE FROM shape_text WHERE board_id = ?'),
+	insertShapeText: db.prepare('INSERT INTO shape_text (id, board_id, text) VALUES (?, ?, ?)'),
+	searchTextFts: db.prepare(`
+		SELECT st.board_id AS boardId, substr(st.id, length(st.board_id) + 2) AS shapeId,
+		       b.title AS boardTitle, st.text AS text
+		FROM shape_text_fts
+		JOIN shape_text st ON st.rowid = shape_text_fts.rowid
+		JOIN boards b ON b.id = st.board_id
+		WHERE shape_text_fts MATCH ?
+		ORDER BY rank
+		LIMIT 50
+	`),
 }
 
 const MAX_SESSION_BYTES = 1_000_000
 const MAX_TITLE_LENGTH = 200
+
+// --- text search index --------------------------------------------------------
+
+/** Rich text is a ProseMirror-style doc: `{ content: [{ content: [{ text }] }] }`. */
+function plainTextFromRichText(node: unknown): string {
+	if (!node || typeof node !== 'object') return ''
+	const { type, text, content } = node as { type?: unknown; text?: unknown; content?: unknown }
+	if (typeof text === 'string') return text
+	if (type === 'hardBreak') return '\n'
+	if (Array.isArray(content)) {
+		const text = content.map(plainTextFromRichText).join('')
+		// Inline nodes (including differently styled text) remain contiguous; blocks
+		// terminate with a separator so paragraphs and list items cannot merge words.
+		return type === 'paragraph' || type === 'heading' || type === 'codeBlock' ||
+			type === 'blockquote' || type === 'listItem' ? `${text}\n` : text
+	}
+	return ''
+}
+
+/** The text a shape shows, mirroring what each shape util's `getText()` would return. */
+function extractShapeText(record: unknown): string | null {
+	if (!record || typeof record !== 'object') return null
+	const { typeName, props } = record as { typeName?: unknown; props?: unknown }
+	if (typeName !== 'shape' || !props || typeof props !== 'object') return null
+	const { richText, text } = props as { richText?: unknown; text?: unknown }
+	// `text` is a fallback for shapes stored before tldraw's richText migration.
+	const plainText = richText ? plainTextFromRichText(richText) : typeof text === 'string' ? text : ''
+	const trimmed = plainText.trim().replace(/\s+/g, ' ')
+	return trimmed || null
+}
+
+/** Re-derives a board's shape_text rows from its sync storage. No-ops for boards never opened. */
+function reindexBoardText(boardId: string) {
+	const table = `r_${boardId}_documents`
+	if (!stmts.tableExists.get(table)) return
+
+	const rows = db.prepare(`SELECT id, state FROM ${table} WHERE id LIKE 'shape:%'`).all() as {
+		id: string
+		state: Uint8Array
+	}[]
+	const entries: { id: string; text: string }[] = []
+	for (const row of rows) {
+		try {
+			const text = extractShapeText(JSON.parse(Buffer.from(row.state).toString('utf8')))
+			if (text) entries.push({ id: row.id, text })
+		} catch {
+			// Skip anything that doesn't parse; it just won't be searchable.
+		}
+	}
+
+	db.exec('BEGIN')
+	try {
+		stmts.deleteShapeText.run(boardId)
+		for (const entry of entries) stmts.insertShapeText.run(`${boardId}:${entry.id}`, boardId, entry.text)
+		db.exec('COMMIT')
+	} catch (e) {
+		db.exec('ROLLBACK')
+		throw e
+	}
+}
+
+// Reindexing scans a whole board's shapes, so batch rapid edits (e.g. dragging) into one pass.
+const reindexTimers = new Map<string, NodeJS.Timeout>()
+function scheduleReindex(boardId: string) {
+	clearTimeout(reindexTimers.get(boardId))
+	reindexTimers.set(
+		boardId,
+		setTimeout(() => {
+			reindexTimers.delete(boardId)
+			try {
+				reindexBoardText(boardId)
+			} catch (e) {
+				console.error(`reindexing ${boardId} failed:`, e)
+			}
+		}, 1000)
+	)
+}
+
+// Covers boards edited before this feature existed, or left stale by an unclean shutdown.
+for (const { id } of stmts.listBoardIds.all() as { id: string }[]) {
+	try {
+		reindexBoardText(id)
+	} catch (e) {
+		console.error(`initial reindex of ${id} failed:`, e)
+	}
+}
+
+function splitTerms(query: string): string[] {
+	return query.trim().split(/\s+/).filter(Boolean).slice(0, 8)
+}
+
+// The trigram tokenizer indexes runs of 3 characters, so a shorter term can't match
+// anything through FTS (not an error, just always empty).
+const MIN_FTS_TERM_LENGTH = 3
+
+function buildFtsMatch(terms: string[]): string {
+	// Each term becomes a quoted substring match; FTS5 syntax characters (like `:` or
+	// `"`) inside a quoted phrase are just literal text.
+	return terms.map((term) => `"${term.replace(/"/g, '""')}"`).join(' AND ')
+}
+
+function escapeLike(term: string): string {
+	return term.replace(/[\\%_]/g, (char) => `\\${char}`)
+}
+
+/** Plain substring scan for queries FTS can't handle (a term under 3 characters). Slower, but
+ * only reached for short queries, where shape_text is small enough that it doesn't matter. */
+function searchTextLike(terms: string[]): TextSearchResult[] {
+	const conditions = terms.map(() => "st.text LIKE ? ESCAPE '\\'").join(' AND ')
+	const params = terms.map((term) => `%${escapeLike(term)}%`)
+	return db
+		.prepare(
+			`SELECT st.board_id AS boardId, substr(st.id, length(st.board_id) + 2) AS shapeId,
+			        b.title AS boardTitle, st.text AS text
+			 FROM shape_text st
+			 JOIN boards b ON b.id = st.board_id
+			 WHERE ${conditions}
+			 LIMIT 50`
+		)
+		.all(...params) as unknown as TextSearchResult[]
+}
 
 // --- sync rooms -------------------------------------------------------------
 
@@ -107,7 +295,10 @@ function getRoom(boardId: string): TLSocketRoom {
 	const sql = new NodeSqliteWrapper(db, { tablePrefix: `r_${boardId}_` })
 	const storage = new SQLiteSyncStorage({
 		sql,
-		onChange: () => stmts.touchBoard.run(Date.now(), boardId),
+		onChange: () => {
+			stmts.touchBoard.run(Date.now(), boardId)
+			scheduleReindex(boardId)
+		},
 	})
 	const room = new TLSocketRoom({
 		schema,
@@ -175,11 +366,11 @@ const methods: BackendMethods = {
 		return stmts.listBoards.all() as unknown as BoardSummary[]
 	},
 
-	createBoard() {
+	createBoard(title) {
 		const now = Date.now()
 		const board: BoardSummary = {
 			id: randomUUID().replaceAll('-', ''),
-			title: 'Untitled',
+			title: title?.trim() || 'Untitled',
 			createdAt: now,
 			updatedAt: now,
 		}
@@ -238,6 +429,15 @@ const methods: BackendMethods = {
 	getLastBoardId() {
 		const row = stmts.lastBoardId.get() as { board_id: string } | undefined
 		return row?.board_id ?? null
+	},
+
+	searchText(query) {
+		const terms = splitTerms(String(query ?? ''))
+		if (terms.length === 0) return []
+		// A term under 3 characters has no trigrams to match through FTS at all, so any
+		// short term routes the whole query through the slower LIKE-based fallback instead.
+		if (terms.some((term) => term.length < MIN_FTS_TERM_LENGTH)) return searchTextLike(terms)
+		return stmts.searchTextFts.all(buildFtsMatch(terms)) as unknown as TextSearchResult[]
 	},
 }
 

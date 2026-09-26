@@ -1,6 +1,7 @@
 :root {
   --bg: #f9fafb;
   --surface: #ffffff;
+  --selection-bg: #f2f2f3;
   --text: #1d1d1f;
   --muted: #6b6b70;
   --border: #e3e3e6;
@@ -18,6 +19,7 @@
   :root {
     --bg: #101011;
     --surface: #1b1b1d;
+    --selection-bg: #343438;
     --text: #f2f2f3;
     --muted: #9a9aa1;
     --border: #2c2c30;
@@ -88,7 +90,7 @@ button:disabled {
    Drag regions swallow clicks, so its buttons opt out. */
 .toolbar {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: stretch;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
@@ -128,32 +130,86 @@ button:disabled {
   color: var(--text);
 }
 
-.toolbar-title {
-  align-self: center;
-  max-width: 50vw;
-  padding: 2px 6px;
-  font-size: 13px;
-  font-weight: 600;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+.tab-strip {
+  display: flex;
+  align-items: stretch;
+  /* Only as wide as the tabs themselves; otherwise it stretches to fill the grid
+     track (justify-items: stretch) and its no-drag region swallows the empty
+     space beside the tabs, where the title bar should still drag. */
+  justify-self: start;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
   /* Drag regions swallow double-clicks (they zoom the window instead), so the
-	   title opts out to be renamable. The rest of the toolbar still drags. */
+	   strip opts out; tabs re-enable dragging on their own empty space isn't needed
+	   since the toolbar's remaining, non-tab area still drags. */
   -webkit-app-region: no-drag;
 }
 
-.toolbar-title-input {
-  field-sizing: content;
-  min-width: 80px;
-  font: inherit;
+.tab-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 200px;
+  padding: 0 6px 0 12px;
+  border-right: 1px solid var(--border);
+  color: var(--muted);
   font-size: 13px;
-  font-weight: 600;
-  text-align: center;
+  cursor: pointer;
+}
+
+.tab[data-active] {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.tab-title {
+  min-width: 0;
+  padding: 8px 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tab-title-input {
+  field-sizing: content;
+  min-width: 40px;
+  max-width: 100%;
+  padding: 3px 4px;
+  margin: 0px -4px;
+  border: none;
+  font: inherit;
   color: var(--text);
   background: var(--surface);
-  border: 1px solid var(--accent);
+  outline: 1px solid var(--accent);
   border-radius: 4px;
-  outline: none;
+}
+
+.toolbar .tab-close {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  justify-content: center;
+  padding: 0;
+  border-radius: 4px;
+  color: var(--muted);
+  opacity: 0;
+}
+
+.tab:hover .tab-close,
+.tab[data-active] .tab-close {
+  opacity: 1;
+}
+
+.toolbar .tab-close:hover {
+  background: rgb(0 0 0 / 0.08);
+  color: var(--text);
 }
 
 .toolbar-end {
@@ -185,6 +241,12 @@ button:disabled {
   display: flex;
   align-items: center;
   height: 100%;
+}
+
+@media (max-width: 800px) {
+  .memory-meter {
+    display: none;
+  }
 }
 
 .toolbar .memory-meter button {
@@ -262,12 +324,8 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
   margin-bottom: 20px;
-}
-
-.home-header h1 {
-  margin: 0;
-  font-size: 20px;
 }
 
 .home-empty {
@@ -276,6 +334,76 @@ button:disabled {
 
 .home-error {
   color: #d93025;
+  font-size: 13px;
+}
+
+.home-search {
+  position: relative;
+  flex: 1;
+  max-width: 420px;
+}
+
+.home-search-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.home-search-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.home-search-results {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 10;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.15);
+}
+
+.home-search-result {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.home-search-result[data-selected="true"] {
+  background: var(--selection-bg);
+}
+
+.home-search-text {
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.home-search-board {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.home-search-empty {
+  padding: 8px 10px;
+  color: var(--muted);
   font-size: 13px;
 }
 
@@ -324,6 +452,223 @@ button:disabled {
 .board-date {
   color: var(--muted);
   font-size: 12px;
+}
+
+/* text search (above tldraw's bottom toolbar, shown via cmd/ctrl+F) */
+
+/* Replaces tldraw's Toolbar slot, so it must behave like tldraw's own .tlui-main-toolbar
+   in the flex row that centers it (.tlui-layout__bottom__main): grow to claim the row's
+   width, and (by not overriding the default align-items: stretch) let the real toolbar
+   inside stretch to fill it. Without that, OverflowingToolbar measures this wrapper's
+   shrink-to-content width instead of the row's, and shows far fewer tools than it should. */
+.text-search {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 2;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.text-search-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  align-self: center;
+  gap: 4px;
+}
+
+.text-search-input {
+  pointer-events: all;
+  width: 220px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  font-size: 13px;
+  box-shadow: var(--tl-shadow-2);
+}
+
+.text-search-input:focus {
+  outline: 2px solid var(--tl-color-selected);
+  outline-offset: -2px;
+}
+
+.text-search-results {
+  pointer-events: all;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 220px;
+  max-height: 200px;
+  padding: 4px;
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: var(--tl-shadow-2);
+  overflow: auto;
+}
+
+.text-search-result {
+  display: block;
+  width: 100%;
+  border: none;
+  border-radius: 4px;
+  padding: 5px 8px;
+  background: transparent;
+  color: var(--text);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.text-search-result[data-selected="true"] {
+  background: var(--selection-bg);
+}
+
+.text-search-empty {
+  padding: 5px 8px;
+  color: var(--muted);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  font-size: 13px;
+}
+
+/* command menu */
+
+.command-menu-overlay {
+  position: fixed;
+  /* Leaves the toolbar unblurred; only the board below it gets the blur. */
+  top: var(--toolbar-height);
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 2000; /* above tldraw's UI */
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
+.command-menu-content {
+  position: fixed;
+  top: 18vh;
+  left: 50%;
+  /* Above the overlay: the overlay's own z-index creates a stacking context, so
+	   without this the whole overlay paints over the dialog regardless of DOM order. */
+  z-index: 2001;
+  transform: translateX(-50%);
+  width: min(560px, calc(100vw - 32px));
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.command-menu {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.command-menu [cmdk-input] {
+  width: 100%;
+  padding: 14px 16px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  outline: none;
+}
+
+.command-menu [cmdk-list] {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.command-menu [cmdk-item] {
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.command-menu [cmdk-item][data-selected="true"] {
+  background: var(--selection-bg);
+}
+
+/* icon picker (Cmd/Ctrl+K -> Insert icon…) */
+
+.icon-grid {
+  position: relative;
+  height: 360px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px;
+}
+
+.icon-grid-spacer {
+  position: relative;
+  width: 100%;
+}
+
+.icon-grid-rows {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: grid;
+  justify-content: center;
+}
+
+.icon-grid-cell {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  padding: 0;
+}
+
+.icon-grid-cell:hover {
+  background: var(--selection-bg);
+}
+
+.icon-grid-cell[data-focused] {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.icon-grid-empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 /* file shapes (PDF, audio) */

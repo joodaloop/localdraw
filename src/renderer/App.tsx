@@ -1,15 +1,17 @@
 import { getAssetUrlsByImport } from '@tldraw/assets/imports.vite'
 import { TLRemoteSyncError } from '@tldraw/sync'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createTLStore, Tldraw, type Editor, type TLStore } from 'tldraw'
-import type { BoardSummary } from '../shared/api'
+import { createTLStore, Tldraw, type Editor, type TLComponents, type TLStore } from 'tldraw'
+import type { BoardSummary, TextSearchResult } from '../shared/api'
 import { assetStore } from './asset-store'
 import { showBoard } from './board-mirror'
 import { allAssetUtils, allShapeUtils, customAssetUtils, customShapeUtils, MAX_ASSET_SIZE } from './media'
 import { registerBookmarkHandler } from './media/bookmarks'
 import { getSavedSession, trackSession } from './sessions'
+import { CommandMenu } from './CommandMenu'
 import { Home } from './Home'
 import { Toolbar } from './Toolbar'
+import { goToShape, searchOverrides, ToolbarWithSearch } from './TextSearch'
 import { BoardSync } from './BoardSync'
 import type { SyncState } from './SyncStatus'
 
@@ -18,6 +20,7 @@ import type { SyncState } from './SyncStatus'
 // formatter would mangle (it only treats http(s) and data: URLs as absolute).
 const assetUrls = getAssetUrlsByImport((url) => url)
 const licenseKey = import.meta.env.VITE_TLDRAW_LICENSE_KEY
+const editorComponents: TLComponents = { Toolbar: ToolbarWithSearch }
 
 /**
  * 'opening' keeps the current screen up while the requested board loads, so
@@ -45,6 +48,12 @@ export function App() {
 	const [shown, setShown] = useState<ShownBoard | null>(null)
 	const [error, setError] = useState<string | null>(null)
 	const [view, setView] = useState<View>('home')
+	// Boards currently open as tabs, in tab-strip order.
+	const [tabs, setTabs] = useState<string[]>([])
+	// Recently closed tabs, most recent last, for Reopen Closed Tab; capped like browsers' own stacks.
+	const [closedTabs, setClosedTabs] = useState<string[]>([])
+	const [commandMenuOpen, setCommandMenuOpen] = useState(false)
+	const [pendingSearchResult, setPendingSearchResult] = useState<TextSearchResult | null>(null)
 
 	// The editor's own store lives as long as the app. Boards are swapped into it
 	// (see board-mirror.ts), so the editor and its UI are never remounted.
@@ -71,6 +80,7 @@ export function App() {
 
 	/** (Re)connects a board and makes it the target; it's swapped into the editor once synced. */
 	const connect = useCallback((boardId: string) => {
+		setPendingSearchResult(null)
 		setError(null)
 		setFailures((prev) => {
 			if (!prev.has(boardId)) return prev
@@ -84,9 +94,87 @@ export function App() {
 	const open = useCallback(
 		(boardId: string) => {
 			connect(boardId)
-			setView('opening')
+			// Switching tabs while a board is already shown stays on 'board': the store-swap
+			// effect below keeps the old board visible until the new one's ready, so there's
+			// nothing to paper over. Dropping to 'opening' here would flash Home in between,
+			// since showHome only checks `shown` (still the old board) truthiness, not the
+			// screen we were actually on.
+			setView((view) => (view === 'board' ? 'board' : 'opening'))
+			setTabs((prev) => (prev.includes(boardId) ? prev : [...prev, boardId]))
 		},
 		[connect]
+	)
+
+	// Closing the active tab falls back to its right-hand neighbor (index shifts down
+	// to take its place), or the left-hand one only if it was the last tab.
+	const closeTab = useCallback(
+		(boardId: string) => {
+			const index = tabs.indexOf(boardId)
+			if (index === -1) return
+			const next = tabs.filter((id) => id !== boardId)
+			setTabs(next)
+			setClosedTabs((prev) => [...prev, boardId].slice(-10))
+			if (targetId === boardId || shown?.id === boardId) {
+				const neighborId = next[index] ?? next[index - 1]
+				if (neighborId) open(neighborId)
+				else {
+					setTargetId(null)
+					setView('home')
+				}
+			}
+		},
+		[tabs, targetId, shown, open]
+	)
+
+	const reopenClosedTab = useCallback(() => {
+		const boardId = closedTabs[closedTabs.length - 1]
+		if (!boardId) return
+		setClosedTabs((prev) => prev.slice(0, -1))
+		open(boardId)
+	}, [closedTabs, open])
+
+	/** Cmd/Ctrl+1–8 jump to that tab position; Cmd/Ctrl+9 always jumps to the last tab. */
+	const gotoTab = useCallback(
+		(position: number) => {
+			if (tabs.length === 0) return
+			const index = position === 9 ? tabs.length - 1 : position - 1
+			const boardId = tabs[index]
+			if (boardId) open(boardId)
+		},
+		[tabs, open]
+	)
+
+	// Swaps the board shown in the current tab for a different one, in place (no new tab).
+	const openInCurrentTab = useCallback(
+		(boardId: string) => {
+			const currentId = view !== 'home' ? (targetId ?? shown?.id ?? null) : null
+			if (!currentId || currentId === boardId) {
+				open(boardId)
+				return
+			}
+			setTabs((prev) => {
+				const withoutBoardId = prev.filter((id) => id !== boardId)
+				const index = withoutBoardId.indexOf(currentId)
+				if (index === -1) return prev.includes(boardId) ? prev : [...withoutBoardId, boardId]
+				const next = [...withoutBoardId]
+				next[index] = boardId
+				return next
+			})
+			connect(boardId)
+			setView((view) => (view === 'board' ? 'board' : 'opening'))
+		},
+		[view, targetId, shown, open, connect]
+	)
+
+	const cycleTab = useCallback(
+		(direction: 1 | -1) => {
+			if (tabs.length === 0) return
+			const currentId = targetId ?? shown?.id ?? tabs[0]
+			const index = tabs.indexOf(currentId)
+			const nextIndex = index === -1 ? 0 : (index + direction + tabs.length) % tabs.length
+			open(tabs[nextIndex])
+		},
+		[tabs, targetId, shown, open]
 	)
 
 	const handleReady = useCallback((boardId: string, store: TLStore | null) => {
@@ -159,6 +247,18 @@ export function App() {
 
 	useEffect(() => () => stopTrackingSession.current?.(), [])
 
+	// Home unmounts the editor. Wait for both the board swap and editor mount
+	// before navigating, so restored session state cannot overwrite the selection.
+	useEffect(() => {
+		if (!pendingSearchResult || !editor || view !== 'board') return
+		if (targetId !== pendingSearchResult.boardId || shown?.id !== pendingSearchResult.boardId) return
+		if (readyStores.get(shown.id) !== shown.store) return
+		const shape = editor.getShape(pendingSearchResult.shapeId)
+		// The index may still contain a shape deleted since the search ran.
+		if (shape) goToShape(editor, shape)
+		setPendingSearchResult(null)
+	}, [pendingSearchResult, editor, view, targetId, shown, readyStores])
+
 	// A failed board's edits can't be saved, so stop taking them until it's back. After a
 	// retry the editor still holds the dead store until the fresh one is swapped in.
 	const shownFailure = shown ? (failures.get(shown.id) ?? null) : null
@@ -169,6 +269,22 @@ export function App() {
 	}, [editor, isReadonly])
 
 	useEffect(() => window.localdraw.onGoHome(() => setView('home')), [])
+	useEffect(() => window.localdraw.onOpenBoardMenu(() => setCommandMenuOpen(true)), [])
+	useEffect(() => window.localdraw.onNextTab(() => cycleTab(1)), [cycleTab])
+	useEffect(() => window.localdraw.onPrevTab(() => cycleTab(-1)), [cycleTab])
+	useEffect(
+		() =>
+			window.localdraw.onCloseTab(() => {
+				const currentId = view !== 'home' ? (targetId ?? shown?.id ?? null) : null
+				// No tab to close (e.g. sitting on Home with nothing open): fall back to the
+				// regular macOS behavior for Cmd+W, closing the window itself.
+				if (currentId) closeTab(currentId)
+				else window.close()
+			}),
+		[view, targetId, shown, closeTab]
+	)
+	useEffect(() => window.localdraw.onReopenTab(reopenClosedTab), [reopenClosedTab])
+	useEffect(() => window.localdraw.onGotoTab(gotoTab), [gotoTab])
 
 	// Show the editor once the requested board is in it.
 	useEffect(() => {
@@ -187,19 +303,30 @@ export function App() {
 		}
 	}, [view])
 
-	async function createBoard() {
+	async function createBoard(title?: string, inCurrentTab?: boolean) {
 		try {
-			const board = await window.localdraw.createBoard()
+			const board = await window.localdraw.createBoard(title)
 			setBoards((list) => [board, ...(list ?? [])])
-			open(board.id)
+			if (inCurrentTab) openInCurrentTab(board.id)
+			else open(board.id)
 		} catch (err) {
 			setError(`Couldn't create board: ${err instanceof Error ? err.message : String(err)}`)
 		}
 	}
 
-	async function renameShownBoard(title: string) {
-		if (!shown) return
-		const boardId = shown.id
+	function insertIcon(iconName: string) {
+		if (!editor) return
+		const size = 64
+		const center = editor.getViewportPageBounds().center
+		editor.createShape({
+			type: 'icon',
+			x: center.x - size / 2,
+			y: center.y - size / 2,
+			props: { icon: iconName, w: size, h: size },
+		})
+	}
+
+	async function renameBoard(boardId: string, title: string) {
 		// Show the new name immediately; reload the list if saving fails.
 		setBoards((list) => list?.map((board) => (board.id === boardId ? { ...board, title } : board)) ?? list)
 		try {
@@ -212,6 +339,8 @@ export function App() {
 
 	const pendingId = targetId && targetId !== shown?.id ? targetId : null
 	const shownTitle = shown ? (boards?.find((board) => board.id === shown.id)?.title ?? 'Untitled') : null
+	const openTabs = tabs.map((id) => ({ id, title: boards?.find((board) => board.id === id)?.title ?? 'Untitled' }))
+	const activeTabId = view !== 'home' ? (targetId ?? shown?.id ?? null) : null
 	// While a board loads, stay on home if that's where it was opened from; on launch show nothing.
 	const showEditor = view === 'board' && shown
 	const showHome = view === 'home' || (view === 'opening' && shown)
@@ -234,11 +363,14 @@ export function App() {
 		<div className="app">
 			<Toolbar
 				isHome={!showEditor}
-				title={showEditor ? shownTitle : null}
+				tabs={openTabs}
+				activeTabId={activeTabId}
 				syncState={syncState}
 				onRetrySync={retryShownBoard}
 				onHome={() => setView('home')}
-				onRename={renameShownBoard}
+				onSelectTab={open}
+				onCloseTab={closeTab}
+				onRenameTab={renameBoard}
 			/>
 			<main className="main">
 				{showEditor ? (
@@ -252,6 +384,8 @@ export function App() {
 						licenseKey={licenseKey}
 						// Follow the OS theme like the rest of the app; a choice in tldraw's menu still wins.
 						colorScheme="system"
+						components={editorComponents}
+						overrides={searchOverrides}
 					/>
 				) : showHome ? (
 					<Home
@@ -259,6 +393,10 @@ export function App() {
 						pendingId={pendingId}
 						error={error}
 						onOpen={open}
+						onOpenSearchResult={(result) => {
+							open(result.boardId)
+							setPendingSearchResult(result)
+						}}
 						onCreate={createBoard}
 					/>
 				) : null}
@@ -266,6 +404,14 @@ export function App() {
 			{connectedIds.map((id) => (
 				<BoardSync key={id} boardId={id} onReady={handleReady} onOffline={handleOffline} onError={handleError} />
 			))}
+			<CommandMenu
+				open={commandMenuOpen}
+				onOpenChange={setCommandMenuOpen}
+				boards={boards}
+				onOpen={(boardId, { newTab }) => (newTab ? open(boardId) : openInCurrentTab(boardId))}
+				onCreate={(title, { newTab }) => createBoard(title, !newTab)}
+				onInsertIcon={editor ? insertIcon : undefined}
+			/>
 		</div>
 	)
 }

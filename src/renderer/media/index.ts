@@ -1,9 +1,10 @@
 import { defaultAssetUtils, defaultShapeUtils } from 'tldraw'
+import { IconShapeUtil } from '../icons/IconShapeUtil'
 import { AudioAssetUtil, PdfAssetUtil } from './file-assets'
 import { AudioShapeUtil, PdfShapeUtil } from './file-shapes'
 
 /** Our additions to tldraw's shapes and assets. Pass to <Tldraw>, which merges them with its defaults. */
-export const customShapeUtils = [PdfShapeUtil, AudioShapeUtil]
+export const customShapeUtils = [PdfShapeUtil, AudioShapeUtil, IconShapeUtil]
 export const customAssetUtils = [PdfAssetUtil, AudioAssetUtil]
 
 /** The complete lists, for stores (which, unlike <Tldraw>, don't add tldraw's defaults). */

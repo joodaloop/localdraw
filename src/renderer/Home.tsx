@@ -1,4 +1,5 @@
-import type { BoardSummary } from '../shared/api'
+import type { BoardSummary, TextSearchResult } from '../shared/api'
+import { HomeSearch } from './HomeSearch'
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
@@ -7,15 +8,16 @@ interface HomeProps {
 	pendingId: string | null
 	error: string | null
 	onOpen(boardId: string): void
+	onOpenSearchResult(result: TextSearchResult): void
 	onCreate(): void
 }
 
-export function Home({ boards, pendingId, error, onOpen, onCreate }: HomeProps) {
+export function Home({ boards, pendingId, error, onOpen, onOpenSearchResult, onCreate }: HomeProps) {
 	return (
 		<div className="home">
 			<header className="home-header">
-				<h1>Boards</h1>
-				<button type="button" className="primary" onClick={onCreate}>
+				<HomeSearch onOpen={onOpenSearchResult} />
+				<button type="button" className="primary" onClick={() => onCreate()}>
 					New board
 				</button>
 			</header>

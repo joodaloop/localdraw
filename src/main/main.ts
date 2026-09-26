@@ -70,14 +70,62 @@ Menu.setApplicationMenu(
 							accelerator: 'CmdOrCtrl+Shift+H',
 							click: (_item, win) => (win instanceof BrowserWindow ? win.webContents.send('go-home') : undefined),
 						},
+						{
+							label: 'Open Board…',
+							accelerator: 'CmdOrCtrl+K',
+							click: (_item, win) => (win instanceof BrowserWindow ? win.webContents.send('open-board-menu') : undefined),
+						},
+						{
+							label: 'Close Tab',
+							accelerator: 'CmdOrCtrl+W',
+							click: (_item, win) => (win instanceof BrowserWindow ? win.webContents.send('close-tab') : undefined),
+						},
+						{
+							label: 'Reopen Closed Tab',
+							accelerator: 'CmdOrCtrl+Shift+T',
+							click: (_item, win) => (win instanceof BrowserWindow ? win.webContents.send('reopen-tab') : undefined),
+						},
 					],
 				},
 				{ label: 'Edit', submenu: [{ role: 'cut' }, { role: 'copy' }, { role: 'paste' }] },
 				{
 					label: 'View',
-					submenu: [{ role: 'reload' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'togglefullscreen' }],
+					submenu: [
+						{ role: 'reload' },
+						{ role: 'toggleDevTools' },
+						{ type: 'separator' },
+						{ role: 'togglefullscreen' },
+						{ type: 'separator' },
+						{
+							label: 'Next Tab',
+							accelerator: 'Control+Tab',
+							click: (_item, win) => (win instanceof BrowserWindow ? win.webContents.send('next-tab') : undefined),
+						},
+						{
+							label: 'Previous Tab',
+							accelerator: 'Control+Shift+Tab',
+							click: (_item, win) => (win instanceof BrowserWindow ? win.webContents.send('prev-tab') : undefined),
+						},
+						{ type: 'separator' },
+						// Cmd+1..8 jump to that tab position; Cmd+9 always jumps to the last tab,
+						// matching Chrome/Safari/Safari's own tab-bar shortcuts.
+						...Array.from({ length: 9 }, (_, i) => {
+							const position = i + 1
+							return {
+								label: position === 9 ? 'Last Tab' : `Tab ${position}`,
+								accelerator: `CmdOrCtrl+${position}`,
+								click: (_item: unknown, win: unknown) =>
+									win instanceof BrowserWindow ? win.webContents.send('goto-tab', position) : undefined,
+							}
+						}),
+					],
 				},
-				{ role: 'windowMenu' },
+				{
+					// Not `{ role: 'windowMenu' }`: its default "Close" item binds Cmd+W to
+					// closing the whole window, which we want free for "Close Tab" above.
+					label: 'Window',
+					submenu: [{ role: 'minimize' }, { role: 'zoom' }],
+				},
 			])
 		: null
 )

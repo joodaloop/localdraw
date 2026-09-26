@@ -13,6 +13,7 @@ import {
 	type TLBaseShape,
 } from '@tldraw/tlschema'
 import { T } from '@tldraw/validate'
+import { iconShapeProps } from './icon-schema'
 
 export const PDF_MIME_TYPES = ['application/pdf'] as const
 
@@ -74,10 +75,15 @@ export type TLAudioAsset = TLBaseAsset<'audio', FileAssetProps>
 export type TLPdfShape = TLBaseShape<'pdf', FileShapeProps>
 export type TLAudioShape = TLBaseShape<'audio', FileShapeProps>
 
-/** The full record schema of a Localdraw board: tldraw's defaults plus our file types. */
+/** The full record schema of a Localdraw board: tldraw's defaults plus our file and icon shapes. */
 export function createLocaldrawSchema() {
 	return createTLSchema({
-		shapes: { ...defaultShapeSchemas, pdf: { props: fileShapeProps }, audio: { props: fileShapeProps } },
+		shapes: {
+			...defaultShapeSchemas,
+			pdf: { props: fileShapeProps },
+			audio: { props: fileShapeProps },
+			icon: { props: iconShapeProps },
+		},
 		assets: { ...defaultAssetSchemas, pdf: { props: fileAssetProps }, audio: { props: fileAssetProps } },
 	})
 }
