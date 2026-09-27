@@ -15,15 +15,18 @@ import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { pathToFileURL } from 'node:url'
-import { RENDERER_METHODS, type MemoryUsage, type RendererMethod } from '../shared/api'
+import { isBoardId, RENDERER_METHODS, type MemoryUsage, type RendererMethod } from '../shared/api'
 import { assetFilePath, isAssetHash } from '../shared/asset-files'
 import { BackendProcess } from './backend-process'
 import { initLog, logError } from './log'
+import { ThumbnailRenderer } from './thumbnails'
 import { unfurl } from './unfurl'
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
 const RENDERER_DIR = path.join(__dirname, '../renderer')
 const APP_ORIGIN = DEV_SERVER_URL ? originOf(DEV_SERVER_URL) : 'localdraw://app'
+// Matches --toolbar-height in styles.css: the canvas fills the window below it.
+const TOOLBAR_HEIGHT = 40
 
 // Data lives in …/Application Support/localdraw, or localdraw-dev in development so
 // work-in-progress code never touches your real boards. Set explicitly because the
@@ -46,7 +49,8 @@ app.setAboutPanelOptions({
 if (!app.requestSingleInstanceLock()) app.quit()
 
 // `localdraw://app/…` serves the built renderer, `localdraw://asset/<sha256>` serves
-// stored files. A privileged standard scheme (not file://) gives the page a real
+// stored files, and `localdraw://thumbnail/<boardId>/<light|dark>` serves board
+// previews. A privileged standard scheme (not file://) gives the page a real
 // origin, fetch() support, and V8 code caching.
 protocol.registerSchemesAsPrivileged([
 	{
@@ -132,6 +136,20 @@ Menu.setApplicationMenu(
 
 const ASSETS_DIR = path.join(app.getPath('userData'), 'assets')
 const backend = new BackendProcess(path.join(app.getPath('userData'), 'localdraw.db'), ASSETS_DIR)
+
+let mainWindow: BrowserWindow | null = null
+
+const thumbnails = new ThumbnailRenderer({
+	backend,
+	pageUrl: DEV_SERVER_URL ? new URL('thumbnail.html', DEV_SERVER_URL).toString() : `${APP_ORIGIN}/thumbnail.html`,
+	getViewport() {
+		const [w, h] = mainWindow && !mainWindow.isDestroyed() ? mainWindow.getContentSize() : [1280, 800]
+		return { w, h: Math.max(1, h - TOOLBAR_HEIGHT) }
+	},
+	onUpdated() {
+		if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('thumbnails-updated')
+	},
+})
 
 function originOf(url: string) {
 	// WHATWG URL reports origin "null" for custom schemes, so build it by hand.
@@ -228,7 +246,12 @@ function createWindow() {
 		// Vertically centre the traffic lights in the 40px toolbar (--toolbar-height in styles.css).
 		trafficLightPosition: { x: 14, y: 13 },
 		show: false,
-		backgroundColor: nativeTheme.shouldUseDarkColors ? '#101011' : '#f9fafb',
+		// On macOS the window is a translucent material that shows through wherever the page
+		// is transparent: only the toolbar (see styles.css). Elsewhere, --surface in styles.css,
+		// so the window doesn't flash a different color before the page paints.
+		...(process.platform === 'darwin'
+			? { vibrancy: 'titlebar' as const, visualEffectState: 'followWindow' as const, backgroundColor: '#00000000' }
+			: { backgroundColor: nativeTheme.shouldUseDarkColors ? '#1b1b1d' : '#ffffff' }),
 		webPreferences: {
 			preload: path.join(__dirname, '../preload/preload.cjs'),
 			sandbox: true,
@@ -258,6 +281,24 @@ function createWindow() {
 	})
 
 	void win.loadURL(DEV_SERVER_URL ?? `${APP_ORIGIN}/index.html`)
+	mainWindow = win
+	win.on('closed', () => {
+		if (mainWindow === win) mainWindow = null
+	})
+}
+
+async function serveThumbnail(pathname: string) {
+	const [boardId, theme] = pathname.split('/')
+	if (!isBoardId(boardId) || (theme !== 'light' && theme !== 'dark')) return new Response('Not found', { status: 404 })
+	const thumbnail = await backend.call('getThumbnail', boardId, theme)
+	if (!thumbnail) return new Response('Not found', { status: 404 })
+	return new Response(thumbnail.image as Uint8Array<ArrayBuffer>, {
+		headers: {
+			'content-type': thumbnail.mime,
+			// Requested with ?v=<version>, so a URL's image never changes.
+			'cache-control': 'public, max-age=31536000, immutable',
+		},
+	})
 }
 
 ipcMain.handle('backend', (event, method: unknown, ...args: unknown[]) => {
@@ -273,6 +314,10 @@ ipcMain.handle('unfurl', (event, url: unknown) => {
 	if (!isTrustedSender(event)) throw new Error('Untrusted sender')
 	if (typeof url !== 'string') throw new Error('Expected a URL')
 	return unfurl(url)
+})
+
+ipcMain.on('refresh-thumbnails', (event) => {
+	if (isTrustedSender(event)) thumbnails.refresh()
 })
 
 ipcMain.on('log-error', (event, message: unknown) => {
@@ -320,11 +365,14 @@ app.whenReady().then(() => {
 	protocol.handle('localdraw', (request) => {
 		const url = new URL(request.url)
 		if (url.host === 'asset') return serveAsset(url.pathname.slice(1), request)
+		if (url.host === 'thumbnail') return serveThumbnail(url.pathname.slice(1))
 		if (url.host === 'app' && !DEV_SERVER_URL) return serveAppFile(url.pathname)
 		return new Response('Not found', { status: 404 })
 	})
 
 	createWindow()
+	// Catches boards edited right before the last quit, and boards that never had a preview.
+	thumbnails.refresh()
 	app.on('activate', () => {
 		if (BrowserWindow.getAllWindows().length === 0) createWindow()
 	})

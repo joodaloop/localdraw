@@ -1,14 +1,16 @@
 import { getAssetUrlsByImport } from '@tldraw/assets/imports.vite'
 import { TLRemoteSyncError } from '@tldraw/sync'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createTLStore, Tldraw, type Editor, type TLComponents, type TLStore } from 'tldraw'
+import { createShapeId, createTLStore, Tldraw, type Editor, type TLComponents, type TLStore } from 'tldraw'
 import type { BoardSummary, TextSearchResult } from '../shared/api'
 import { assetStore } from './asset-store'
 import { showBoard } from './board-mirror'
 import { allAssetUtils, allShapeUtils, customAssetUtils, customShapeUtils, MAX_ASSET_SIZE } from './media'
 import { registerBookmarkHandler } from './media/bookmarks'
-import { getSavedSession, trackSession } from './sessions'
+import { flushSession, getSavedSession, trackSession } from './sessions'
 import { CommandMenu } from './CommandMenu'
+import { NATIVE_SIZE } from './icon-shapes/IconShapeUtil'
+import type { FramePreset } from './frame-presets'
 import { Home } from './Home'
 import { Toolbar } from './Toolbar'
 import { goToShape, searchOverrides, ToolbarWithSearch } from './TextSearch'
@@ -114,6 +116,9 @@ export function App() {
 			const next = tabs.filter((id) => id !== boardId)
 			setTabs(next)
 			setClosedTabs((prev) => [...prev, boardId].slice(-10))
+			// Render the closed board's preview (and any other out-of-date ones) in the background,
+			// once its latest camera is saved: the preview is drawn from the saved one.
+			void flushSession(boardId).finally(() => window.localdraw.refreshThumbnails())
 			if (targetId === boardId || shown?.id === boardId) {
 				const neighborId = next[index] ?? next[index - 1]
 				if (neighborId) open(neighborId)
@@ -125,6 +130,14 @@ export function App() {
 		},
 		[tabs, targetId, shown, open]
 	)
+
+	const moveTab = useCallback((boardId: string, index: number) => {
+		setTabs((prev) => {
+			const next = prev.filter((id) => id !== boardId)
+			next.splice(index, 0, boardId)
+			return next
+		})
+	}, [])
 
 	const reopenClosedTab = useCallback(() => {
 		const boardId = closedTabs[closedTabs.length - 1]
@@ -269,6 +282,11 @@ export function App() {
 	}, [editor, isReadonly])
 
 	useEffect(() => window.localdraw.onGoHome(() => setView('home')), [])
+	// A preview finished rendering; reload the list for its new thumbnail version.
+	useEffect(
+		() => window.localdraw.onThumbnailsUpdated(() => window.localdraw.listBoards().then(setBoards, console.error)),
+		[]
+	)
 	useEffect(() => window.localdraw.onOpenBoardMenu(() => setCommandMenuOpen(true)), [])
 	useEffect(() => window.localdraw.onNextTab(() => cycleTab(1)), [cycleTab])
 	useEffect(() => window.localdraw.onPrevTab(() => cycleTab(-1)), [cycleTab])
@@ -316,7 +334,8 @@ export function App() {
 
 	function insertIcon(iconName: string) {
 		if (!editor) return
-		const size = 64
+		// The icon's native size, whatever the zoom; resize it on the board from there.
+		const size = NATIVE_SIZE
 		const center = editor.getViewportPageBounds().center
 		editor.createShape({
 			type: 'icon',
@@ -324,6 +343,15 @@ export function App() {
 			y: center.y - size / 2,
 			props: { icon: iconName, w: size, h: size },
 		})
+	}
+
+	function insertFrame({ name, w, h }: FramePreset) {
+		if (!editor) return
+		const center = editor.getViewportPageBounds().center
+		const id = createShapeId()
+		editor.createShape({ id, type: 'frame', x: center.x - w / 2, y: center.y - h / 2, props: { name, w, h } })
+		editor.select(id)
+		editor.zoomToSelection({ animation: { duration: 200 } })
 	}
 
 	async function renameBoard(boardId: string, title: string) {
@@ -371,6 +399,7 @@ export function App() {
 				onSelectTab={open}
 				onCloseTab={closeTab}
 				onRenameTab={renameBoard}
+				onMoveTab={moveTab}
 			/>
 			<main className="main">
 				{showEditor ? (
@@ -411,6 +440,7 @@ export function App() {
 				onOpen={(boardId, { newTab }) => (newTab ? open(boardId) : openInCurrentTab(boardId))}
 				onCreate={(title, { newTab }) => createBoard(title, !newTab)}
 				onInsertIcon={editor ? insertIcon : undefined}
+				onInsertFrame={editor ? insertFrame : undefined}
 			/>
 		</div>
 	)

@@ -57,6 +57,8 @@ export function rendererConfig() {
 			outDir: dist('renderer'),
 			emptyOutDir: true,
 			target: 'chrome152', // Electron 44
+			// The hidden window that renders board previews (see src/main/thumbnails.ts) is its own page.
+			rollupOptions: { input: { index: src('renderer', 'index.html'), thumbnail: src('renderer', 'thumbnail.html') } },
 		},
 	}
 }
@@ -93,6 +95,7 @@ export const nodeBuilds = [
 	[src('main', 'main.ts'), dist('main')],
 	[src('backend', 'backend.ts'), dist('main')],
 	[src('preload', 'preload.ts'), dist('preload')],
+	[src('preload', 'thumbnail-preload.ts'), dist('preload')],
 ]
 
 export { dist, root }

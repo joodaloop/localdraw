@@ -6,7 +6,7 @@ import { getTablerFilledIcon, getTablerIcon } from './tabler-registry'
 const ICON_STROKE_WIDTH: Record<TLIconShape['props']['size'], number> = { s: 1, m: 1.5, l: 2, xl: 2.5 }
 
 /** The icon's own native size (Tabler's viewBox is 24x24); double-clicking an edge snaps to it. */
-const NATIVE_SIZE = 24
+export const NATIVE_SIZE = 24
 
 function rotate(x: number, y: number, angle: number) {
 	const cos = Math.cos(angle)
@@ -20,7 +20,7 @@ export class IconShapeUtil extends BaseBoxShapeUtil<TLIconShape> {
 	static override props = iconShapeProps
 
 	override getDefaultProps(): TLIconShape['props'] {
-		return { w: 64, h: 64, icon: DEFAULT_ICON_NAME, color: 'black', size: 'm', fill: 'none' }
+		return { w: NATIVE_SIZE, h: NATIVE_SIZE, icon: DEFAULT_ICON_NAME, color: 'black', size: 'm', fill: 'none' }
 	}
 
 	override isAspectRatioLocked() {

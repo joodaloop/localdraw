@@ -7,6 +7,9 @@
   --border: #e3e3e6;
   --accent: #2f80ed;
   --accent-text: #ffffff;
+  /* The active tab and home button: a translucent shade, darker in light mode and lighter in
+     dark, so it works over both the solid toolbar and the macOS translucent one. */
+  --tab-active-bg: rgb(0 0 0 / 0.05);
   color-scheme: light dark;
   font-family:
     system-ui,
@@ -23,6 +26,7 @@
     --text: #f2f2f3;
     --muted: #9a9aa1;
     --border: #2c2c30;
+    --tab-active-bg: rgb(255 255 255 / 0.07);
   }
 }
 
@@ -40,7 +44,7 @@ body,
 }
 
 body {
-  background: var(--bg);
+  background: var(--surface);
   color: var(--text);
 }
 
@@ -82,6 +86,15 @@ button:disabled {
   min-width: 0;
   min-height: 0;
   overflow: auto;
+  /* Opaque even where the body isn't (the macOS vibrancy below). */
+  background: var(--surface);
+}
+
+/* On macOS the window itself is a translucent material (vibrancy, set in main.ts). Clearing
+   the page and toolbar backgrounds lets it show through the toolbar; .main stays opaque. */
+:root[data-platform="darwin"] body,
+:root[data-platform="darwin"] .toolbar {
+  background: transparent;
 }
 
 /* toolbar */
@@ -93,7 +106,7 @@ button:disabled {
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: stretch;
   border-bottom: 1px solid var(--border);
-  background: var(--bg);
+  background: var(--surface);
   -webkit-app-region: drag;
   user-select: none;
 }
@@ -126,8 +139,13 @@ button:disabled {
 }
 
 .toolbar .toolbar-home[aria-current] {
-  background: var(--surface);
+  background: var(--tab-active-bg);
   color: var(--text);
+}
+
+/* The icon's version of an active tab's bold title. */
+.toolbar .toolbar-home[aria-current] svg {
+  stroke-width: 2.5;
 }
 
 .tab-strip {
@@ -155,18 +173,40 @@ button:disabled {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 6px;
-  max-width: 200px;
-  padding: 0 6px 0 12px;
+  gap: 4px;
+  /* Fixed, so the close button appearing on hover shortens the title instead of widening the tab. */
+  width: 160px;
+  padding: 0 12px;
   border-right: 1px solid var(--border);
   color: var(--muted);
   font-size: 13px;
   cursor: pointer;
 }
 
+/* The close button sits nearer the edge than the text does. */
+.tab:hover {
+  padding-right: 6px;
+}
+
+.tab[data-dragging] {
+  opacity: 0.4;
+}
+
+/* A line where the dragged tab will land. Inset shadows, so the tab's size doesn't change. */
+.tab[data-drop="before"] {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.tab[data-drop="after"] {
+  box-shadow: inset -2px 0 0 var(--accent);
+}
+
 .tab[data-active] {
-  background: var(--surface);
+  background: var(--tab-active-bg);
   color: var(--text);
+  font-weight: 600;
+  /* Bold text runs wider; tighten it back toward the regular weight's width. */
+  letter-spacing: -0.025em;
 }
 
 .tab-title {
@@ -175,6 +215,9 @@ button:disabled {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  /* Whole pixels, and shared with the rename field below: with a fractional line height the
+     two center differently in the tab and the text jumps a pixel when renaming starts. */
+  line-height: 16px;
 }
 
 .tab-title-input {
@@ -185,6 +228,10 @@ button:disabled {
   margin: 0px -4px;
   border: none;
   font: inherit;
+  /* `font` resets line-height, so set it after: the title's, so the text doesn't shift. */
+  line-height: 16px;
+  /* Not covered by `font`, and text fields reset it to normal; the active tab tightens it. */
+  letter-spacing: inherit;
   color: var(--text);
   background: var(--surface);
   outline: 1px solid var(--accent);
@@ -193,18 +240,20 @@ button:disabled {
 
 .toolbar .tab-close {
   flex: none;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   justify-content: center;
   padding: 0;
   border-radius: 4px;
   color: var(--muted);
-  opacity: 0;
+  /* Takes no space until hovered, then takes it from the title. */
+  display: none;
+  /* Pinned to the tab's right edge, however short the title. */
+  margin-left: auto;
 }
 
-.tab:hover .tab-close,
-.tab[data-active] .tab-close {
-  opacity: 1;
+.toolbar .tab:hover .tab-close {
+  display: flex;
 }
 
 .toolbar .tab-close:hover {
@@ -315,7 +364,8 @@ button:disabled {
 /* home */
 
 .home {
-  max-width: 960px;
+  /* Three 330px cards and their gaps (3 × 330 + 2 × 12), plus the side padding. */
+  max-width: 1062px;
   margin: 0 auto;
   padding: 32px 24px;
 }
@@ -412,19 +462,40 @@ button:disabled {
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  /* 330px wide at the max width; stays at three columns down to 280px each before dropping to two. */
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 12px;
 }
 
 .board-grid button {
   width: 100%;
-  height: 96px;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
-  gap: 4px;
-  padding: 12px 14px;
+  padding: 0;
+  overflow: hidden;
   text-align: left;
+}
+
+/* Previews are rendered at this shape (THUMBNAIL_ASPECT in thumbnail.ts); keep the two in step. */
+.board-preview {
+  display: block;
+  aspect-ratio: 16 / 10;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.board-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.board-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px 12px;
 }
 
 .board-grid button:hover {
@@ -560,8 +631,8 @@ button:disabled {
   bottom: 0;
   left: 0;
   z-index: 2000; /* above tldraw's UI */
-  -webkit-backdrop-filter: blur(3px);
-  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
 }
 
 .command-menu-content {
@@ -617,6 +688,32 @@ button:disabled {
 
 .command-menu [cmdk-item][data-selected="true"] {
   background: var(--selection-bg);
+}
+
+.command-menu [cmdk-group-heading] {
+  padding: 10px 12px 4px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.command-menu [cmdk-empty] {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Right-aligned secondary text inside an item, e.g. a frame preset's size. */
+.command-menu [cmdk-item]:has(.command-menu-hint) {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.command-menu-hint {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 /* icon picker (Cmd/Ctrl+K -> Insert icon…) */

@@ -15,6 +15,7 @@ import {
 	type BackendResponse,
 	type BoardSummary,
 	type TextSearchResult,
+	type ThumbnailJob,
 } from '../shared/api'
 import { assetFilePath, isAssetHash } from '../shared/asset-files'
 import { createLocaldrawSchema } from '../shared/media-schema'
@@ -25,6 +26,12 @@ if (!dbPath || !assetsDir) throw new Error('backend: expected <database path> <a
 const MAX_ASSET_BYTES = 1024 * 1024 * 1024
 
 const db = new DatabaseSync(dbPath)
+
+// Early builds stored a single `image` per board. Previews are only a cache, so drop the
+// table for the CREATE below to replace; the next refresh renders them all again.
+if ((db.prepare('PRAGMA table_info(thumbnails)').all() as { name: string }[]).some((c) => c.name === 'image')) {
+	db.exec('DROP TABLE thumbnails')
+}
 db.exec(`
 	PRAGMA journal_mode = WAL;
 	PRAGMA synchronous = NORMAL;
@@ -61,6 +68,19 @@ db.exec(`
 		text     TEXT NOT NULL
 	) STRICT;
 	CREATE INDEX IF NOT EXISTS idx_shape_text_board_id ON shape_text(board_id);
+
+	-- One preview image per board, rendered from its last saved camera view. source_version
+	-- is the newer of the board's and its session's updated_at when it was rendered, so a
+	-- board needs a new one once either moves past it. Both color modes are stored so Home
+	-- can follow the system's. NULL images mean there was nothing to show (or rendering
+	-- failed); it's retried only once the board changes again.
+	CREATE TABLE IF NOT EXISTS thumbnails (
+		board_id       TEXT PRIMARY KEY REFERENCES boards(id) ON DELETE CASCADE,
+		source_version INTEGER NOT NULL,
+		light          BLOB,
+		dark           BLOB,
+		mime           TEXT
+	) STRICT;
 
 `)
 
@@ -125,9 +145,13 @@ function moveAssetBlobsToDisk() {
 }
 
 const stmts = {
-	listBoards: db.prepare(
-		'SELECT id, title, created_at AS createdAt, updated_at AS updatedAt FROM boards ORDER BY updated_at DESC'
-	),
+	listBoards: db.prepare(`
+		SELECT b.id, b.title, b.created_at AS createdAt, b.updated_at AS updatedAt,
+		       CASE WHEN t.light IS NULL THEN NULL ELSE t.source_version END AS thumbnailVersion
+		FROM boards b
+		LEFT JOIN thumbnails t ON t.board_id = b.id
+		ORDER BY b.updated_at DESC
+	`),
 	insertBoard: db.prepare('INSERT INTO boards (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)'),
 	boardExists: db.prepare('SELECT 1 FROM boards WHERE id = ?'),
 	touchBoard: db.prepare('UPDATE boards SET updated_at = ? WHERE id = ?'),
@@ -141,6 +165,27 @@ const stmts = {
 	),
 	lastBoardId: db.prepare('SELECT board_id FROM sessions ORDER BY updated_at DESC LIMIT 1'),
 	listBoardIds: db.prepare('SELECT id FROM boards'),
+	thumbnailSources: db.prepare(`
+		SELECT b.id, max(b.updated_at, coalesce(s.updated_at, 0)) AS sourceVersion, t.source_version AS thumbnailVersion
+		FROM boards b
+		LEFT JOIN sessions s ON s.board_id = b.id
+		LEFT JOIN thumbnails t ON t.board_id = b.id
+		ORDER BY b.updated_at DESC
+	`),
+	thumbnailSource: db.prepare(`
+		SELECT max(b.updated_at, coalesce(s.updated_at, 0)) AS sourceVersion, s.state AS session
+		FROM boards b
+		LEFT JOIN sessions s ON s.board_id = b.id
+		WHERE b.id = ?
+	`),
+	putThumbnail: db.prepare(
+		`INSERT INTO thumbnails (board_id, source_version, light, dark, mime) VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT (board_id) DO UPDATE SET
+		   source_version = excluded.source_version, light = excluded.light, dark = excluded.dark,
+		   mime = excluded.mime`
+	),
+	getLightThumbnail: db.prepare('SELECT light AS image, mime FROM thumbnails WHERE board_id = ? AND light IS NOT NULL'),
+	getDarkThumbnail: db.prepare('SELECT dark AS image, mime FROM thumbnails WHERE board_id = ? AND dark IS NOT NULL'),
 	tableExists: db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?"),
 	deleteShapeText: db.prepare('DELETE FROM shape_text WHERE board_id = ?'),
 	insertShapeText: db.prepare('INSERT INTO shape_text (id, board_id, text) VALUES (?, ?, ?)'),
@@ -303,6 +348,12 @@ function getRoom(boardId: string): TLSocketRoom {
 	const room = new TLSocketRoom({
 		schema,
 		storage,
+		// No idle timeout. It exists to drop network clients that vanish without closing their
+		// socket, but a MessagePort reports its other end going away (see PortSocket), so it
+		// only ever caught healthy clients: Chromium throttles a window's timers to once a
+		// minute after it's been hidden for 5 minutes, which starves the client's 5s pings,
+		// and the default 20s timeout then cut the board off and reconnected it every minute.
+		clientTimeout: Infinity,
 		// Goes to stderr, which the main process copies into the log file.
 		log: { warn: console.warn, error: console.error },
 		onSessionRemoved(room, { numSessionsRemaining }) {
@@ -313,6 +364,24 @@ function getRoom(boardId: string): TLSocketRoom {
 	})
 	rooms.set(boardId, room)
 	return room
+}
+
+/** A board's saved document, read without opening a sync room; null if it was never opened. */
+function readBoardDocument(boardId: string): ThumbnailJob['document'] {
+	// An open room holds the latest state in memory; read that rather than a second storage.
+	const open = rooms.get(boardId)
+	const snapshot = open && !open.isClosed() ? open.getCurrentSnapshot() : readStoredSnapshot(boardId)
+	if (!snapshot) return null
+	return {
+		store: Object.fromEntries(snapshot.documents.map(({ state }) => [state.id, state])),
+		schema: snapshot.schema,
+	}
+}
+
+function readStoredSnapshot(boardId: string) {
+	const sql = new NodeSqliteWrapper(db, { tablePrefix: `r_${boardId}_` })
+	if (!SQLiteSyncStorage.hasBeenInitialized(sql)) return null
+	return new SQLiteSyncStorage({ sql }).getSnapshot()
 }
 
 /** Adapts an Electron MessagePortMain to the socket shape TLSocketRoom expects. */
@@ -373,6 +442,7 @@ const methods: BackendMethods = {
 			title: title?.trim() || 'Untitled',
 			createdAt: now,
 			updatedAt: now,
+			thumbnailVersion: null,
 		}
 		stmts.insertBoard.run(board.id, board.title, board.createdAt, board.updatedAt)
 		return board
@@ -438,6 +508,51 @@ const methods: BackendMethods = {
 		// short term routes the whole query through the slower LIKE-based fallback instead.
 		if (terms.some((term) => term.length < MIN_FTS_TERM_LENGTH)) return searchTextLike(terms)
 		return stmts.searchTextFts.all(buildFtsMatch(terms)) as unknown as TextSearchResult[]
+	},
+
+	staleThumbnails() {
+		const rows = stmts.thumbnailSources.all() as {
+			id: string
+			sourceVersion: number
+			thumbnailVersion: number | null
+		}[]
+		return rows.filter((row) => row.thumbnailVersion == null || row.thumbnailVersion < row.sourceVersion).map((row) => row.id)
+	},
+
+	getThumbnailJob(boardId) {
+		if (!isBoardId(boardId)) throw new Error('Invalid board id')
+		const row = stmts.thumbnailSource.get(boardId) as { sourceVersion: number; session: string | null } | undefined
+		if (!row) return null
+		return {
+			boardId,
+			sourceVersion: row.sourceVersion,
+			document: readBoardDocument(boardId),
+			session: row.session ? JSON.parse(row.session) : null,
+		}
+	},
+
+	putThumbnail(boardId, sourceVersion, images) {
+		if (!isBoardId(boardId)) throw new Error('Invalid board id')
+		if (!Number.isSafeInteger(sourceVersion)) throw new Error('Invalid source version')
+		if (images !== null && !(images.light instanceof Uint8Array && images.dark instanceof Uint8Array)) {
+			throw new Error('Invalid thumbnail images')
+		}
+		// The board may have been deleted while its preview rendered.
+		if (!stmts.boardExists.get(boardId)) return
+		stmts.putThumbnail.run(
+			boardId,
+			sourceVersion,
+			images?.light ?? null,
+			images?.dark ?? null,
+			images ? String(images.mime) : null
+		)
+	},
+
+	getThumbnail(boardId, theme) {
+		if (!isBoardId(boardId)) return null
+		const stmt = theme === 'dark' ? stmts.getDarkThumbnail : stmts.getLightThumbnail
+		const row = stmt.get(boardId) as { image: Uint8Array; mime: string } | undefined
+		return row ?? null
 	},
 }
 

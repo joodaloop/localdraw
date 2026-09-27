@@ -10,6 +10,7 @@ const api: LocaldrawApi = {
 	saveSession: (boardId, state) => ipcRenderer.invoke('backend', 'saveSession', boardId, state),
 	getLastBoardId: () => ipcRenderer.invoke('backend', 'getLastBoardId'),
 	searchText: (query) => ipcRenderer.invoke('backend', 'searchText', query),
+	refreshThumbnails: () => ipcRenderer.send('refresh-thumbnails'),
 	unfurl: (url) => ipcRenderer.invoke('unfurl', url),
 	getMemoryUsage: () => ipcRenderer.invoke('memory-usage'),
 	logError: (message) => ipcRenderer.send('log-error', message),
@@ -48,6 +49,12 @@ const api: LocaldrawApi = {
 		const listener = () => callback()
 		ipcRenderer.on('reopen-tab', listener)
 		return () => void ipcRenderer.off('reopen-tab', listener)
+	},
+
+	onThumbnailsUpdated(callback) {
+		const listener = () => callback()
+		ipcRenderer.on('thumbnails-updated', listener)
+		return () => void ipcRenderer.off('thumbnails-updated', listener)
 	},
 
 	onGotoTab(callback) {

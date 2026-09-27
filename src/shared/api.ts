@@ -6,6 +6,8 @@ export interface BoardSummary {
 	title: string
 	createdAt: number
 	updatedAt: number
+	/** Changes whenever the board's preview image does; null while it has none. */
+	thumbnailVersion: number | null
 }
 
 export interface AssetUpload {
@@ -27,6 +29,44 @@ export interface TextSearchResult {
 	text: string
 }
 
+/** Everything needed to render one board's preview, read from the database. */
+export interface ThumbnailJob {
+	boardId: string
+	/** The newer of the board's and its session's `updated_at`; saved with the result. */
+	sourceVersion: number
+	/** The board's document as a tldraw store snapshot; null for a board never opened. */
+	document: { store: Record<string, unknown>; schema: unknown } | null
+	/** The board's saved view state (page, camera), if any. */
+	session: unknown
+}
+
+export type ThumbnailTheme = 'light' | 'dark'
+
+/** A board's preview in both color modes, so Home can follow the system's without re-rendering. */
+export interface ThumbnailImages {
+	light: Uint8Array
+	dark: Uint8Array
+	mime: string
+}
+
+/** What the thumbnail window is asked to render. */
+export interface ThumbnailRenderRequest {
+	requestId: number
+	job: ThumbnailJob
+	/** The main window's canvas size in CSS pixels, to turn the saved camera into a page-space box. */
+	viewport: { w: number; h: number }
+}
+
+export type ThumbnailRenderResult =
+	| { requestId: number; ok: true; images: ThumbnailImages | null }
+	| { requestId: number; ok: false; error: string }
+
+/** The API the thumbnail window's preload exposes on `window.thumbnailWorker`. */
+export interface ThumbnailWorkerApi {
+	onRender(callback: (request: ThumbnailRenderRequest) => void): void
+	sendResult(result: ThumbnailRenderResult): void
+}
+
 /** Request/response methods implemented by the backend utility process. */
 export interface BackendMethods {
 	listBoards(): BoardSummary[]
@@ -41,6 +81,12 @@ export interface BackendMethods {
 	getLastBoardId(): string | null
 	/** Full-text search over every board's shape labels, newest-indexed match ranking first. */
 	searchText(query: string): TextSearchResult[]
+	/** Boards whose preview is missing or older than their content or camera, most recently edited first. */
+	staleThumbnails(): string[]
+	getThumbnailJob(boardId: string): ThumbnailJob | null
+	/** Null images record that there's nothing to show (empty board, or rendering failed) for this version. */
+	putThumbnail(boardId: string, sourceVersion: number, images: ThumbnailImages | null): void
+	getThumbnail(boardId: string, theme: ThumbnailTheme): { image: Uint8Array; mime: string } | null
 }
 
 export type BackendMethod = keyof BackendMethods
@@ -88,6 +134,10 @@ export interface LocaldrawApi {
 	saveSession(boardId: string, state: unknown): Promise<void>
 	getLastBoardId(): Promise<string | null>
 	searchText(query: string): Promise<TextSearchResult[]>
+	/** Asks the main process to re-render any out-of-date board previews. */
+	refreshThumbnails(): void
+	/** Subscribes to board preview updates. Returns an unsubscribe function. */
+	onThumbnailsUpdated(callback: () => void): () => void
 	getMemoryUsage(): Promise<MemoryUsage>
 	/** Fetches a web page's title, description and preview images, for bookmark cards. */
 	unfurl(url: string): Promise<LinkPreview>
@@ -129,6 +179,8 @@ export interface LinkPreview {
  */
 export const ASSET_SRC_PREFIX = 'asset:'
 export const ASSET_URL_PREFIX = 'localdraw://asset/'
+/** Board previews are served at `localdraw://thumbnail/<boardId>/<light|dark>?v=<thumbnailVersion>`. */
+export const THUMBNAIL_URL_PREFIX = 'localdraw://thumbnail/'
 
 const BOARD_ID_RE = /^[0-9a-f]{32}$/
 export function isBoardId(value: unknown): value is string {

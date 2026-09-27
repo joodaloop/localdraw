@@ -1,5 +1,5 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
-import { getTablerIcon, tablerIconLabel, tablerIconNames } from './tabler-registry'
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { getTablerIcon, loadTablerTags, searchTablerIcons, tablerIconLabel } from './tabler-registry'
 
 const CELL_SIZE = 56
 const ROW_HEIGHT = 56
@@ -39,8 +39,18 @@ export const IconGrid = forwardRef<IconGridHandle, IconGridProps>(function IconG
 		return () => observer.disconnect()
 	}, [])
 
-	const needle = query.trim().toLowerCase()
-	const matches = needle ? tablerIconNames.filter((name) => tablerIconLabel(name).includes(needle)) : tablerIconNames
+	// Keyword tags load in the background; until they arrive, searches match names only.
+	const [tagsLoaded, setTagsLoaded] = useState(false)
+	useEffect(() => {
+		let cancelled = false
+		loadTablerTags().then(() => !cancelled && setTagsLoaded(true), console.error)
+		return () => {
+			cancelled = true
+		}
+	}, [])
+
+	// Not recomputed on scroll or focus changes, only when the search (or the tags) change.
+	const matches = useMemo(() => searchTablerIcons(query), [query, tagsLoaded])
 
 	// A fresh search starts from the top, focused on the first result.
 	useEffect(() => {
@@ -112,7 +122,11 @@ export const IconGrid = forwardRef<IconGridHandle, IconGridProps>(function IconG
 									className="icon-grid-cell"
 									data-focused={index === clampedFocus || undefined}
 									title={tablerIconLabel(name)}
-									onMouseEnter={() => setFocusedIndex(index)}
+									// Not onMouseEnter: that also fires when new results slide under a pointer
+									// that hasn't moved, stealing focus from the first result on every keystroke.
+									onMouseMove={(e) => {
+										if (e.movementX !== 0 || e.movementY !== 0) setFocusedIndex(index)
+									}}
 									onClick={() => onSelect(name)}
 								>
 									<Icon size={22} stroke={1.75} />
