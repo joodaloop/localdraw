@@ -204,9 +204,6 @@ button:disabled {
 .tab[data-active] {
   background: var(--tab-active-bg);
   color: var(--text);
-  font-weight: 600;
-  /* Bold text runs wider; tighten it back toward the regular weight's width. */
-  letter-spacing: -0.025em;
 }
 
 .tab-title {
