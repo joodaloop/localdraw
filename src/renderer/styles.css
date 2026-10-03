@@ -143,11 +143,6 @@ button:disabled {
   color: var(--text);
 }
 
-/* The icon's version of an active tab's bold title. */
-.toolbar .toolbar-home[aria-current] svg {
-  stroke-width: 2.5;
-}
-
 .tab-strip {
   display: flex;
   align-items: stretch;
